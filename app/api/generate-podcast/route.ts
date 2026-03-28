@@ -86,11 +86,12 @@ export async function POST(req: NextRequest) {
     // Use Buffer.from for efficient server-side base64 decode (avoids atob char loop)
     const pcmData = Buffer.from(audioData, 'base64');
     const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
+    const wavBuffer = Buffer.from(wavData.buffer, wavData.byteOffset, wavData.byteLength);
 
-    return new NextResponse(wavData, {
+    return new NextResponse(wavBuffer, {
       headers: {
         'Content-Type': 'audio/wav',
-        'Content-Length': String(wavData.byteLength),
+        'Content-Length': String(wavBuffer.byteLength),
         'Content-Disposition': 'attachment; filename="podcast.wav"',
       },
     });
