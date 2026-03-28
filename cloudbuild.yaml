@@ -1,0 +1,38 @@
+steps:
+  # Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/deckcast:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/deckcast:latest'
+      - '.'
+    timeout: '1800s'
+
+  # Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', '--all-tags', 'gcr.io/$PROJECT_ID/deckcast']
+
+  # Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'deckcast'
+      - '--image=gcr.io/$PROJECT_ID/deckcast:$COMMIT_SHA'
+      - '--region=asia-east1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=512Mi'
+      - '--port=3000'
+
+images:
+  - 'gcr.io/$PROJECT_ID/deckcast:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/deckcast:latest'
+
+options:
+  machineType: 'E2_HIGHCPU_8'   # 更高規格，避免 build 記憶體不足
+  logging: CLOUD_LOGGING_ONLY
+  timeout: '1800s'
