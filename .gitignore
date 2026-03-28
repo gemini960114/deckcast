@@ -1,0 +1,47 @@
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# ── Next.js build output ──
+.next/
+out/
+build/
+
+# ── Production standalone output ──
+.next/standalone/
+.next/static/
+
+# ── Environment variables (NEVER commit) ──
+.env
+.env.*
+!.env.example
+
+# ── Local Claude / AI agent config ──
+.claude/
+.agents/
+
+# ── Debug logs ──
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# ── TypeScript ──
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Vercel ──
+.vercel

@@ -1,0 +1,40 @@
+# ── Dependencies (reinstalled in Docker) ──
+node_modules
+npm-debug.log*
+
+# ── Next.js build output (rebuilt in Docker) ──
+.next
+out
+
+# ── Local env files ──
+.env
+.env.*
+
+# ── Git ──
+.git
+.gitignore
+
+# ── Claude / AI agent (local dev only) ──
+.claude
+.agents
+CLAUDE.md
+AGENTS.md
+
+# ── Docs & specs ──
+README.md
+spec.md
+
+# ── Docker files themselves (no need to copy in) ──
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# ── Editor / OS ──
+.DS_Store
+*.swp
+*.swo
+Thumbs.db
+
+# ── TypeScript build info ──
+*.tsbuildinfo
+next-env.d.ts
