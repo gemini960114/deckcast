@@ -291,12 +291,13 @@ export const DEFAULT_TONE            = '語氣親切、易懂，適合一般聽�
 export const DEFAULT_VOICE1          = 'Zephyr';
 export const DEFAULT_VOICE2          = 'Puck';
 export const DEFAULT_STYLE_ID        = 1;
-export const DEFAULT_LYRICS_DURATION = 'Free style';
+export const DEFAULT_LYRICS_DURATION = '105';
 
-export const LYRICS_FREE_STYLE = 'Free style';
-export const LYRICS_DURATIONS  = [
-  'Free style', '60-second', '90-second',
-  '120-second', '150-second', '180-second',
+export const LYRICS_DURATIONS = [
+  { label: 'Short（精華版）– 60s', value: '60' },
+  { label: 'Standard（主打歌 ⭐）– 105s', value: '105' },
+  { label: 'Full（完整版）– 135s', value: '135' },
+  { label: 'Pro（演唱會版）– 180s', value: '180' }
 ] as const;
 
 export const voiceSampleUrl = (name: string) =>
@@ -332,19 +333,8 @@ Speaker 2: ...
 
 每張投影片請分段呈現。`.trim();
 
-export const LYRICS_PROMPT_FREE = (styleLabel: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，並依照以下投影片內容順序編寫歌詞`;
-
 export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，總長度恰好 ${totalSec} 秒（結束時間 ${endTime}），並依照以下投影片內容順序編寫歌詞。
-
-請使用時間軸格式輸出，精確標註每個段落的起訖時間，格式如下：
-
-[0:00 - 0:10] Intro: 開場氛圍與樂器描述
-[0:10 - 0:40] Verse 1: 歌詞內容...
-[0:40 - 1:00] Chorus: 歌詞內容...
-...
-[最後段落的結束時間必須恰好為 ${endTime}，所有段落加總須等於 ${totalSec} 秒]`;
+  `幫我創作 ${styleLabel} 風格歌詞，長度約 ${totalSec} 秒，並依照以下投影片內容順序編寫歌詞。`;
 
 function xorWithSeed(str: string, seed: string): string {
   return Array.from(str)
@@ -505,7 +495,7 @@ export async function apiFetch(path: string, body: object): Promise<Response> {
 ## 14. lib/prompts.ts
 
 ```typescript
-import { LYRICS_FREE_STYLE, PODCAST_PROMPT_TEMPLATE, LYRICS_PROMPT_FREE, LYRICS_PROMPT_TIMED } from './constants';
+import { PODCAST_PROMPT_TEMPLATE, LYRICS_PROMPT_TIMED } from './constants';
 
 export function buildPodcastPrompt(vars: {
   speaker1: string; speaker2: string; dialogueStyle: string; tone: string;
@@ -514,11 +504,14 @@ export function buildPodcastPrompt(vars: {
 }
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
-  if (duration === LYRICS_FREE_STYLE) return LYRICS_PROMPT_FREE(styleLabel);
-  const totalSec = parseInt(duration);
+  const parsedSec = parseInt(duration, 10);
+  const totalSec = isNaN(parsedSec) ? 90 : parsedSec; 
+  
   const mm = Math.floor(totalSec / 60);
   const ss = String(totalSec % 60).padStart(2, '0');
-  return LYRICS_PROMPT_TIMED(styleLabel, totalSec, `${mm}:${ss}`);
+  const endTime = \`\${mm}:\${ss}\`;
+  
+  return LYRICS_PROMPT_TIMED(styleLabel, totalSec, endTime);
 }
 ```
 
