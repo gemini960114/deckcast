@@ -186,6 +186,13 @@ Gemini 回傳結果 → 前端儲存至 IndexedDB
 
 後端不儲存 Key、不連資料庫、不處理業務邏輯，職責僅為安全代理。
 
+### 🔒 資安防護與隱私聲明 (Security & Privacy)
+
+本專案採行嚴格的「無狀態（Stateless）」與「無伺服器金鑰」設計，擁有極高的安全性：
+1. **無寫死金鑰（No Hardcoded Keys）**：原始碼中不包含任何 Gemini 或其他 API Key。不論是 Push 上 GitHub 或是將專案設為公開（Public），絕對不會有「連帶洩漏金鑰導致被盜刷」的風險。
+2. **無環境變數依賴（No `.env` Storage）**：不管是跑在 Docker 或 Google Cloud Run，所有的伺服器主機都不需要設定、也不會存放你的私密金鑰，所有 API Key 皆由每一次的使用者請求 (`Request Headers`) 動態帶入。
+3. **前端銷毀機制（Client-side Protection）**：使用者的 API Key 僅短暫儲存於瀏覽器當下分頁的 `sessionStorage`，只要關閉該網頁分頁就會立刻銷毀消失。
+
 ---
 
 ## 使用限制
@@ -221,26 +228,44 @@ npm run dev
 
 ---
 
-## 雲端部署 (Google Cloud Run)
+## 部署與發布
 
-建議在部署前先在本地端執行建置，確保沒有任何 TypeScript 型別或語法錯誤：
+本專案支援多種部署方式，你可以依照需求選擇適合的環境。
 
-```bash
-# 第一步：本地端建置自測
-npm run build
-```
+### 方式 1：使用 Docker 容器化
 
-本地建置成功（顯示 ✓ Compiled successfully）後，使用以下指令將專案部署至 Google Cloud Run：
+適用於本地測試或自家伺服器：
 
 ```bash
-# 第二步：上傳並部署
-gcloud run deploy deckcast --source . --region asia-east1 --project gen-lang-client-0039151647 --allow-unauthenticated
+# 1. 建立 Docker 映像檔
+docker build -t deckcast-app .
+
+# 2. 啟動容器（將系統 port 3000 指向容器）
+docker run -p 3000:3000 -d deckcast-app
+```
+啟動後，於瀏覽器前往 `http://localhost:3000` 即可使用。
+
+### 方式 2：使用 Docker Compose
+
+使用 `docker-compose.yml` 一鍵背景建置與啟動服務：
+
+```bash
+# 建置並在背景啟動
+docker compose up -d --build
+
+# 停止服務
+docker compose down
 ```
 
-💡 **單行自動完成版指令（推薦）：**
+### 方式 3：雲端部署 (Google Cloud Run)
+
+建議在部署前先確保本地端 `npm run build` 不會產生 TypeScript 語法錯誤。
+
+💡 **單行自動驗證與部署指令（推薦）：**
 ```bash
 npm run build && gcloud run deploy deckcast --source . --region asia-east1 --project gen-lang-client-0039151647 --allow-unauthenticated
 ```
+> *(附註：`&&` 代表只有本地建置成功過關，才會往雲端拋送部署，以免浪費雲端額度與等待時間。)*
 
 ---
 
