@@ -716,6 +716,7 @@ export async function generatePptx(
   timings: SlideTimings,
   audioBlob?: Blob
 ): Promise<Blob> {
+  // @ts-ignore: bypass remote https import typing
   const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
 
@@ -947,11 +948,11 @@ export async function POST(req: NextRequest) {
     const mimeType = part?.inlineData?.mimeType ?? 'audio/L16;rate=24000';
     const sampleRate = parseInt(mimeType.match(/rate=(\d+)/)?.[1] ?? '24000');
 
-    // ⚠️ Server side 用 Buffer.from()，不要用 atob() 逐字元迴圈（大檔案會很慢）
     const pcmData = Buffer.from(audioData, 'base64');
     const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
 
-    return new NextResponse(wavData, {
+    // ⚠️ 必須明確轉型 wavData as any，否則 Cloud Run 中的 Next.js 嚴格編譯期會報錯
+    return new NextResponse(wavData as any, {
       headers: {
         'Content-Type': 'audio/wav',
         'Content-Length': String(wavData.byteLength),  // ⚠️ 必須加，否則瀏覽器 Failed to fetch
@@ -1102,9 +1103,32 @@ useEffect(() => {
 
 ```typescript
 async function handlePdfUpload(file: File) {
+  if (!apiKey) { setToast('請先填入 Gemini API Key'); return; }
+
+  // 1. 檢查檔案格式
+  if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    const msg = '上傳檔案必須為 pdf';
+    setStep1State({ status: 'error', error: msg });
+    setToast(msg);
+    return;
+  }
+
   setPdfFile(file);
   setStep1State({ status: 'loading' });
   try {
+    // 2. 檢查 PDF 頁數限制 (用 CDN版 pdfjs-dist 解析)
+    const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
+    const arrayBuffer = await file.arrayBuffer();
+    const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    
+    if (pdfDoc.numPages < 5 || pdfDoc.numPages > 10) {
+      const msg = '請上傳 5-10 頁的範圍簡報檔案';
+      setStep1State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
     // ⚠️ 必須用 FileReader.readAsDataURL，不能用 String.fromCharCode(...new Uint8Array(buf))
     // 後者對大型 PDF 會觸發 RangeError: Maximum call stack size exceeded
     const pdfBase64 = await new Promise<string>((resolve, reject) => {
@@ -1441,3 +1465,30 @@ Step 5：/api/generate-music → Lyria → MP3
 1. **副檔名與 Type 檢查**：非 PDF 拒絕上傳。
 2. **CDN 套件頁數檢查**：透過動態載入的 WebpackIgnore 版 `pdfjs-dist` 預先讀取檔案陣列 (`ArrayBuffer`) 解析 `numPages`。
 3. **5–10 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
+
+---
+
+## 28. 部署指南 (Deployment)
+
+專案支援多種實體部署方式，詳細操作可參考 `README.md`。此處說明 LLM 重建所需的核心部署設定檔：
+
+### 28.1 Dockerfile (Multi-stage Build)
+使用標準的 Next.js 分段建置，減少 Image size 並提升安全性：
+- **Stage 1 (deps)**: 安裝 dependencies
+- **Stage 2 (builder)**: 執行 `npm run build`
+- **Stage 3 (runner)**: 使用 standalone 模式運行，暴露 port 3000
+
+### 28.2 Docker Compose
+使用 `docker-compose.yml` 管理服務，映射 3000 port，並加入健康檢查機制作為 Production 的穩定執行方式。
+
+### 28.3 Google Cloud Run
+完全由全託管 Serverless 運行：
+```bash
+npm run build && \
+gcloud run deploy deckcast \
+  --source . \
+  --region asia-east1 \
+  --allow-unauthenticated \
+  --project [YOUR_PROJECT_ID]
+```
+必須先在本地端執行 `npm run build` 確認 TypeScript 檢查通過後再推送至 Cloud Run，以節省雲端建置的漫長等待時間與運算成本。
