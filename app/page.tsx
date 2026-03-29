@@ -333,9 +333,9 @@ export default function Home() {
   }
 
   async function handleGenerateLyrics() {
-    if (!script) return; setStep5State({ status: 'loading' });
+    if (!slides) return; setStep5State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration });
+      const res = await apiFetch('/api/generate-lyrics', { slides, styleId, duration: lyricsDuration });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
       if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '' });
@@ -654,7 +654,7 @@ export default function Home() {
 
         {/* ── Step 5 ── */}
         <div ref={step5Ref}>
-          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script} dark={dark}>
+          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!slides} dark={dark}>
             {step5State.status === 'loading'
               ? <LoadingBar message="正在生成歌詞..." dark={dark} />
               : <ActionBtn onClick={handleGenerateLyrics}>{step5State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
