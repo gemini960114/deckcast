@@ -90,8 +90,30 @@ export function buildPodcastPrompt(vars: {
 
 // ===== Lyrics Prompts =====
 export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) => `
-請依照以下投影片內容，為我設計一首總長約 ${totalSec} 秒的歌曲。
-請嚴格依照下方的【雙層結構】輸出，不要夾帶任何其他說明文字。
+請依照以下投影片內容，幫我創作一首 ${styleLabel} 風格歌曲。
+請嚴格閱讀並遵守以下所有規範：
+
+【重大約束】
+1. 總長度必須嚴格等於 ${totalSec} 秒（最後一秒落在 ${endTime}）。
+2. 若時間總長度加總不等於 ${totalSec} 秒，請在心裡自動調整各段落時間，直到完全符合。
+
+【優先順序】
+1. 時間總長度正確（最高優先）
+2. 段落結構合理
+3. 音樂自然流暢
+4. 歌詞內容品質
+
+【時間規則】
+1. 每個段落必須標註精確時間區間 (格式: [mm:ss - mm:ss])。
+2. 所有段落首尾相連且總和等於 ${totalSec} 秒。
+3. Outro 必須精確結束於 ${endTime}。
+4. 段落長度需符合常見音樂比例，避免過短或過長影響音樂自然性。
+5. 結構為線性發展，不重複段落。
+6. 避免為了湊時間而產生不自然或冗長的歌詞內容。
+
+【輸出規範】
+輸出必須嚴格符合下方【雙層結構】格式，不得新增或省略任何區塊與標籤。
+不得輸出任何額外說明與問候文字。
 
 【音樂控制層 / Music Control】
 Style: ${styleLabel}
@@ -101,9 +123,9 @@ Instruments: [請根據風格，填入 2-3 個英文代表樂器，如 acoustic 
 【內容結構層 / Content & Structure】
 [0:00 - 0:10] Intro: [描述開場氛圍]
 [0:10 - 0:40] Verse 1: 
-(在此填入投影片轉換的歌詞...)
+(在此填入結合投影片知識的歌詞...)
 
-[最後段落請盡量落在 ${endTime} 附近，並標註 Outro 淡出作結]
+[請接續發展，利用上述時間規則，最後必須標註 Outro 淡出作結，準確落在 ${endTime}]
 `.trim();
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
