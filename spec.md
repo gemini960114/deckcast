@@ -1296,13 +1296,15 @@ npm run dev -- --port 4000 --webpack
 ### 23.2 pdfjs-dist v5 webpack 打包失敗
 
 **症狀**：`TypeError: Object.defineProperty called on non-object` 在 `pdf.mjs:1`
-**原因**：pdfjs-dist v5 是 ESM，webpack 打包時破壞模組初始化
-**解法**：用 `webpackIgnore` 從 CDN 直接在執行期載入，完全繞過 webpack
+**原因**：pdfjs-dist v5 是 ESM，webpack 打包時會將模組轉換為被凍結的命名空間（Sealed Namespace Object）。後續覆寫 `workerSrc` 時就會觸發 TypeError。
+**解法**：用 `webpackIgnore` 從 CDN 直接在執行期載入，完全繞過 webpack。且因為 HTTPS 模組無法在建置期解析，必須加上 `// @ts-ignore` 才能通過 `npm run build`。
 ```typescript
-// ✅ 正確
+// ✅ 正確 (app/page.tsx 與 lib/generatePptx.ts 皆同)
+// @ts-ignore: bypass remote https import typing
 const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
 
-// ❌ 錯誤 — 會被 webpack 打包並崩潰
+// ❌ 錯誤 — 會被 webpack 凍結並在執行時崩潰
 const pdfjsLib = await import('pdfjs-dist');
 ```
 
@@ -1368,6 +1370,16 @@ headers: { 'Content-Length': String(wavData.byteLength) }
 **原因**：手動操作 PPTX XML 時若 `[Content_Types].xml` 未更新，或 XML 結構錯誤，PowerPoint 拒絕開啟
 **教訓**：複雜 XML 操作風險高，盡量使用 pptxgenjs 的標準 API（如 `slide.addMedia()`）
 
+### 23.9 雲端部署建置 (Cloud Run) NextResponse 型別錯誤
+
+**症狀**：`npm run build` 時 `app/api/generate-podcast/route.ts` 報錯 `Type 'Uint8Array' is not assignable to type 'BodyInit'` 或 Buffer 相關轉換錯誤。
+**原因**：Next.js 在嚴格的 TypeScript 檢查下，部分 Node.js 基礎型別 (Buffer) 傳入 `NextResponse` 建構子不被允許。
+**解法**：將最終生成的音訊轉換為標準 `Uint8Array`，並在傳入時強制轉型為 `any` 繞過型別檢查。
+```typescript
+const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
+return new NextResponse(wavData as any, { headers: { ... } });
+```
+
 ---
 
 ## 24. IndexedDB Schema
@@ -1412,3 +1424,20 @@ Step 5：/api/generate-music → Lyria → MP3
 - PPTX 嵌入音訊後無法自動設定「跨投影片播放」，需使用者手動勾選
 - CDN 載入 pdfjs 需要網路連線（首次 PPTX 生成時約 1MB 下載）
 - TTS 多人語音使用 `gemini-2.5-flash-preview-tts`，預覽模型可能有 quota 限制
+
+---
+
+## 27. 資安防護與邊界檢查
+
+為確保開源後可安全部署於公共伺服器（如 Cloud Run），專案加入以下安全與成本管控機制：
+
+### 27.1 BYOK 無伺服器金鑰架構
+- 原始碼與環境環境變數完全不儲存 API Key。
+- 前端發送 Request 前使用 `sessionStorage` 中的金鑰，配合字串 XOR 與 base64 進行簡易模糊化（防止網路工具明文側錄）。
+- 瀏覽器分頁關閉後金鑰即銷毀，後端實作純無狀態代理 (`getAI(req)` 動態擷取 Header 金鑰初始化)。
+
+### 27.2 PDF 前端前置過濾 (Token 節流)
+為防止惡意使用者上傳百頁以上的大型文獻檔，耗盡使用者的 Gemini Token 額度，在 `app/page.tsx` 實作前端邊界攔截：
+1. **副檔名與 Type 檢查**：非 PDF 拒絕上傳。
+2. **CDN 套件頁數檢查**：透過動態載入的 WebpackIgnore 版 `pdfjs-dist` 預先讀取檔案陣列 (`ArrayBuffer`) 解析 `numPages`。
+3. **5–10 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
