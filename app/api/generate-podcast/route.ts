@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
     const wavUint8Array = new Uint8Array(wavData.buffer, wavData.byteOffset, wavData.byteLength);
 
-    return new NextResponse(wavUint8Array, {
+    return new NextResponse(wavUint8Array as any, {
       headers: {
         'Content-Type': 'audio/wav',
         'Content-Length': String(wavUint8Array.byteLength),

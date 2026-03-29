@@ -1,0 +1,41 @@
+# ── 使用 .gitignore 規則為基礎 ──
+.git
+.gitignore
+
+# ── Dependencies (Cloud Build 內重新安裝) ──
+node_modules/
+
+# ── Next.js build output (Cloud Build 內重新 build) ──
+.next/
+out/
+build/
+
+# ── Local env files ──
+.env
+.env.*
+
+# ── Claude / AI agent (本地開發用) ──
+.claude/
+.agents/
+CLAUDE.md
+AGENTS.md
+
+# ── TypeScript build info ──
+*.tsbuildinfo
+next-env.d.ts
+
+# ── Editor / OS ──
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo
+
+# ── Docs & specs (非必要) ──
+README.md
+spec.md
+
+# ── Design assets (已刪除但防呆) ──
+stitch_ai_creator_home_variant_1*/

@@ -221,6 +221,29 @@ npm run dev
 
 ---
 
+## 雲端部署 (Google Cloud Run)
+
+建議在部署前先在本地端執行建置，確保沒有任何 TypeScript 型別或語法錯誤：
+
+```bash
+# 第一步：本地端建置自測
+npm run build
+```
+
+本地建置成功（顯示 ✓ Compiled successfully）後，使用以下指令將專案部署至 Google Cloud Run：
+
+```bash
+# 第二步：上傳並部署
+gcloud run deploy deckcast --source . --region asia-east1 --project gen-lang-client-0039151647 --allow-unauthenticated
+```
+
+💡 **單行自動完成版指令（推薦）：**
+```bash
+npm run build && gcloud run deploy deckcast --source . --region asia-east1 --project gen-lang-client-0039151647 --allow-unauthenticated
+```
+
+---
+
 ## 完成條件（Definition of Done）
 
 使用者可以：
