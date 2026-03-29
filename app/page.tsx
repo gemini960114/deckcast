@@ -233,8 +233,28 @@ export default function Home() {
 
   async function handlePdfUpload(file: File) {
     if (!apiKey) { setToast('請先填入 Gemini API Key'); return; }
+
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      const msg = '上傳檔案必須為 pdf';
+      setStep1State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
     setPdfFile(file); setStep1State({ status: 'loading' });
     try {
+      const pdfjsLib = await import('pdfjs-dist');
+      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs';
+      const arrayBuffer = await file.arrayBuffer();
+      const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      
+      if (pdfDoc.numPages < 5 || pdfDoc.numPages > 10) {
+        const msg = '請上傳 5-10 頁的範圍簡報檔案';
+        setStep1State({ status: 'error', error: msg });
+        setToast(msg);
+        return;
+      }
+
       const pdfBase64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => resolve((reader.result as string).split(',')[1]);
