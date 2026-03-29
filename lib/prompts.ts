@@ -1,4 +1,4 @@
-import { LYRICS_FREE_STYLE } from './constants';
+import { DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE } from './constants';
 
 export const GENERATE_MUSIC_SRT = `
 我將提供一首 AI 生成的歌曲音檔，以及其對應的歌詞本（可能內含「投影片 N」或音樂結構標記）。
@@ -25,21 +25,26 @@ export const GENERATE_PODCAST_SRT = `
 
 export const FIND_TRANSITIONS_PROMPT = `
 我將給你兩份資料：
-[資料 A] 原始文稿 (內含如「投影片 N：」、「[Verse N]」或「[段落 N]」等明顯換頁/分節結構標記)。
-[資料 B] 對剛剛這份文稿所打好的超準確 SRT 字幕時間軸。
+[資料 A] 原始文稿 (可能是 Podcast 對白或歌曲歌詞，內含「對應投影片 N」或「投影片 N：」等標記)。
+[資料 B] 對剛剛這份文稿所聽寫打好的「超準確 SRT 字幕時間軸」。
 
-你的任務是：交叉比對這兩份資料，找出原始文稿中「每一張投影片的第一個字/第一句話」，對應在 SRT 字幕檔裡面『何時開始被唸出來 (vocalStartSec)』。
+你的核心目標：找出「每一張投影片的第一句話文字」，對應在 SRT (資料 B) 裡面『到底是在哪一秒被唱出來/唸出來的 (vocalStartSec)』。
+
+【極度重要：文字定錨法 SOP】
+步驟 1：在 [資料 A] 尋找對應第 N 張投影片的標記 (可能寫做「對應投影片 N」、「投影片 N：」等)，並擷取這頁中「真正開口的第一句話文字」（例如：這枚 Power Coin 閃爍著橘色光芒）。
+步驟 2：完全忽略 [資料 A] 段落旁附帶的預估時間標記（如 [0:30-0:50]），因為 AI 歌手經常脫稿演出，那些預估時間是毫無參考價值的假資訊，看字不看時間！
+步驟 3：拿著剛剛擷取的那句文字，去 [資料 B] 的 SRT 裡面進行地毯式檢索，找出這句話實際被唱/唸出來的 SRT 區塊（如果找不到 100% 一模一樣的句子，請找音近或語意最近的句子充當定錨點）。
+步驟 4：抓取該 SRT 區塊的第一個時間軸起點（如 00:00:46,000），將其轉換為秒數（46.0），這才是該投影片正確無誤的真理時間 (vocalStartSec)。
 
 嚴格要求：
 1. 你的輸出必須是一個標準的 JSON 陣列，不可包含 markdown 語法或其他說明字眼。
-2. 每個物件必須包含 "slideIndex" (投影片編號，必須是數字) 以及 "vocalStartSec" (這頁第一句話在 SRT 中開始的秒數，譬如 00:00:15,500 就填 15.5)。
-3. 第 1 張投影片不一定從 0 秒開始。如果有前奏音樂，可能要等 15 秒才會有第一句話被唸出來。
-4. 請窮盡尋找每張投影片的精確時間點。如果沒找到對應的字句，請大膽利用上下文的時間軸進行合理推算。
+2. 每個物件必須包含 "slideIndex" (投影片編號，必須是數字) 以及 "vocalStartSec" (這頁第一句話在 SRT 中開始的確切秒數)。
+3. 第一張投影片如果有前奏音樂，可能要等 15 秒才會有第一句話被唸出來，請精確按照 SRT 推算。
 
 輸出範例 (絕對不可包含 \`\`\`):
 [
   { "slideIndex": 1, "vocalStartSec": 2.5 },
-  { "slideIndex": 2, "vocalStartSec": 30.0 }
+  { "slideIndex": 2, "vocalStartSec": 46.0 }
 ]
 `.trim();
 
@@ -89,50 +94,10 @@ export function buildPodcastPrompt(vars: {
 }
 
 // ===== Lyrics Prompts =====
-export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) => `
-請依照以下投影片內容，幫我創作一首 ${styleLabel} 風格歌曲。
-請嚴格閱讀並遵守以下所有規範：
-
-【重大約束】
-1. 總長度必須嚴格等於 ${totalSec} 秒（最後一秒落在 ${endTime}）。
-2. 若時間總長度加總不等於 ${totalSec} 秒，請在心裡自動調整各段落時間，直到完全符合。
-
-【優先順序】
-1. 時間總長度正確（最高優先）
-2. 段落結構合理
-3. 音樂自然流暢
-4. 歌詞內容品質
-
-【時間規則】
-1. 每個段落必須標註精確時間區間 (格式: [mm:ss - mm:ss])。
-2. 所有段落首尾相連且總和等於 ${totalSec} 秒。
-3. Outro 必須精確結束於 ${endTime}。
-4. 段落長度需符合常見音樂比例，避免過短或過長影響音樂自然性。
-5. 結構為線性發展，不重複段落。
-6. 避免為了湊時間而產生不自然或冗長的歌詞內容。
-
-【輸出規範】
-輸出必須嚴格符合下方【雙層結構】格式，不得新增或省略任何區塊與標籤。
-不得輸出任何額外說明與問候文字。
-
-【音樂控制層 / Music Control】
-Style: ${styleLabel}
-Mood: [請根據投影片內容，填入 2-3 個英文情緒形容詞，如 nostalgic, energetic]
-Instruments: [請根據風格，填入 2-3 個英文代表樂器，如 acoustic guitar, lo-fi drum]
-
-【內容結構層 / Content & Structure】
-[0:00 - 0:10] Intro: [描述開場氛圍]
-[0:10 - 0:40] Verse 1: 
-(在此填入結合投影片知識的歌詞...)
-
-[請接續發展，利用上述時間規則，最後必須標註 Outro 淡出作結，準確落在 ${endTime}]
-`.trim();
+export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) =>
+  `幫我創作 ${styleLabel} 風格歌詞，長度約 ${totalSec} 秒，並依照以下投影片內容順序編寫歌詞。`;
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
-  if (duration === LYRICS_FREE_STYLE) {
-    return `幫我創作 ${styleLabel} 風格歌詞，並依照投影片內容編寫。`;
-  }
-  
   // 提取數字部分，解析失敗則給予預設值 90 秒
   const parsedSec = parseInt(duration, 10);
   const totalSec = isNaN(parsedSec) ? 90 : parsedSec; 
