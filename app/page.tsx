@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { setUnauthorizedHandler, apiFetch } from '@/lib/apiFetch';
 import { generatePptx } from '@/lib/generatePptx';
-import { calcPodcastTimings, calcMusicTimings } from '@/lib/timing';
+import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration } from '@/lib/timing';
 import { saveRecord, updateRecord, getAllRecords, deleteRecord } from '@/lib/db';
 import type { GenerationRecord, StepState } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
@@ -22,6 +22,13 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 function downloadText(text: string, filename: string) {
   downloadBlob(new Blob([text], { type: 'text/plain;charset=utf-8' }), filename);
+}
+async function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve((reader.result as string).split(',')[1]);
+    reader.onerror = reject; reader.readAsDataURL(blob);
+  });
 }
 
 // ── theme tokens ──
@@ -200,6 +207,8 @@ export default function Home() {
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
   const [step4State, setStep4State] = useState<StepState>({ status: 'idle' });
   const [step5State, setStep5State] = useState<StepState>({ status: 'idle' });
+  const [step6State, setStep6State] = useState<StepState>({ status: 'idle' });
+  const [step7State, setStep7State] = useState<StepState>({ status: 'idle' });
   const [pptxLoading, setPptxLoading] = useState(false);
   const [toast, setToast] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -211,6 +220,8 @@ export default function Home() {
   const step3Ref = useRef<HTMLDivElement>(null);
   const step4Ref = useRef<HTMLDivElement>(null);
   const step5Ref = useRef<HTMLDivElement>(null);
+  const step6Ref = useRef<HTMLDivElement>(null);
+  const step7Ref = useRef<HTMLDivElement>(null);
 
   const t = useTheme(dark);
 
@@ -256,11 +267,7 @@ export default function Home() {
         return;
       }
 
-      const pdfBase64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve((reader.result as string).split(',')[1]);
-        reader.onerror = reject; reader.readAsDataURL(file);
-      });
+      const pdfBase64 = await blobToBase64(file);
       const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64 });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -312,7 +319,7 @@ export default function Home() {
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob(); setMusicBlob(blob); setStep5State({ status: 'done' });
       if (recordId) await updateRecord(recordId, { musicBlob: blob });
-      if (podcastBlob && script && pdfFile) generatePptxInBackground(blob);
+      setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
       const msg = String(e); const isBlocked = msg.includes('PROHIBITED_CONTENT');
       setStep5State({ status: 'error', error: isBlocked ? 'PROHIBITED_CONTENT：歌詞觸發內容審核，請重新生成歌詞後再試' : msg });
@@ -320,24 +327,59 @@ export default function Home() {
     }
   }
 
-  const generatePptxInBackground = useCallback(async (mBlob: Blob) => {
+  async function handleGeneratePodcastPptx() {
     if (!podcastBlob || !script || !pdfFile) return;
-    setPptxLoading(true);
+    setStep6State({ status: 'loading' });
     try {
       const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 5;
-      const [podcastTimings, musicTimings] = await Promise.all([calcPodcastTimings(script, slideCount, podcastBlob), calcMusicTimings(slideCount, mBlob, lyrics)]);
-      const [pPptx, mPptx] = await Promise.all([generatePptx(pdfFile, podcastTimings, podcastBlob), generatePptx(pdfFile, musicTimings, mBlob)]);
-      setPodcastPptxBlob(pPptx); setMusicPptxBlob(mPptx);
-      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pPptx, musicPptxBlob: mPptx });
-      setToast('簡報已準備好，可下載'); loadHistory();
-    } catch (e) { setToast('PPTX 生成失敗：' + String(e)); }
-    finally { setPptxLoading(false); }
-  }, [podcastBlob, script, slides, lyrics, pdfFile, recordId]);
+      const audioBase64 = await blobToBase64(podcastBlob);
+      const duration = await getAudioDuration(podcastBlob);
+      
+      const res = await apiFetch('/api/align-podcast', { script, audioBase64 });
+      let timings;
+      if (res.ok) {
+        const data = await res.json();
+        timings = normalizeTimings(data.timings, slideCount, duration);
+      } else {
+        console.warn('API align-podcast failed, falling back to heuristic calculation.', await res.text());
+        timings = await calcPodcastTimings(script, slideCount, podcastBlob);
+      }
 
-  useEffect(() => {
-    if (step4State.status === 'done' && step5State.status === 'done' && musicBlob && !podcastPptxBlob)
-      generatePptxInBackground(musicBlob);
-  }, [step4State.status, step5State.status, musicBlob, podcastPptxBlob, generatePptxInBackground]);
+      const pptx = await generatePptx(pdfFile, timings, podcastBlob);
+      setPodcastPptxBlob(pptx); setStep6State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx });
+      setToast('Podcast 簡報已生成！'); loadHistory();
+    } catch (e) {
+      setStep6State({ status: 'error', error: String(e) }); setToast('Podcast 簡報生成失敗：' + String(e));
+    }
+  }
+
+  async function handleGenerateMusicPptx() {
+    if (!musicBlob || !lyrics || !pdfFile) return;
+    setStep7State({ status: 'loading' });
+    try {
+      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 5;
+      const audioBase64 = await blobToBase64(musicBlob);
+      const duration = await getAudioDuration(musicBlob);
+      
+      const res = await apiFetch('/api/align-music', { lyrics, audioBase64 });
+      let timings;
+      if (res.ok) {
+        const data = await res.json();
+        timings = normalizeTimings(data.timings, slideCount, duration);
+      } else {
+        console.warn('API align-music failed, falling back to heuristic calculation.', await res.text());
+        timings = await calcMusicTimings(slideCount, musicBlob, lyrics);
+      }
+
+      const pptx = await generatePptx(pdfFile, timings, musicBlob);
+      setMusicPptxBlob(pptx); setStep7State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx });
+      setToast('音樂簡報已生成！'); loadHistory();
+    } catch (e) {
+      setStep7State({ status: 'error', error: String(e) }); setToast('音樂簡報生成失敗：' + String(e));
+    }
+  }
 
   function loadRecord(rec: GenerationRecord) {
     if (rec.speaker1) setSpeaker1(rec.speaker1); if (rec.speaker2) setSpeaker2(rec.speaker2);
@@ -360,7 +402,9 @@ export default function Home() {
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
     setStep1State({ status: 'idle' }); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
-    setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' }); setPptxLoading(false); setRecordId('');
+    setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' }); 
+    setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
+    setPptxLoading(false); setRecordId('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -601,6 +645,22 @@ export default function Home() {
           </StepCard>
         </div>
 
+        {/* ── Step 6 ── */}
+        <div ref={step6Ref}>
+          <StepCard step={6} title="生成 Podcast 簡報 (AI 精準對齊)" state={step6State} disabled={!podcastBlob} dark={dark}>
+            {step6State.status === 'loading'
+              ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
+              : <ActionBtn onClick={handleGeneratePodcastPptx}>{step6State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>}
+            {podcastPptxBlob && step6State.status === 'done' && (
+              <div className="mt-3 space-y-2">
+                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
+                <DownloadChip label="podcast_slides.pptx" onClick={() => downloadBlob(podcastPptxBlob, 'podcast_slides.pptx')} dark={dark} />
+              </div>
+            )}
+            {step6State.error && <p className={errBox}>{step6State.error}</p>}
+          </StepCard>
+        </div>
+
         {/* ── Step 5 ── */}
         <div ref={step5Ref}>
           <StepCard step={5} title="生成歌曲音訊" state={step5State} disabled={!lyrics} dark={dark}>
@@ -624,6 +684,22 @@ export default function Home() {
                 )}
               </div>
             )}
+          </StepCard>
+        </div>
+
+        {/* ── Step 7 ── */}
+        <div ref={step7Ref}>
+          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob} dark={dark}>
+            {step7State.status === 'loading'
+              ? <LoadingBar message="AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
+              : <ActionBtn onClick={handleGenerateMusicPptx}>{step7State.status === 'done' ? '重新生成歌曲簡報' : '生成歌曲簡報'}</ActionBtn>}
+            {musicPptxBlob && step7State.status === 'done' && (
+              <div className="mt-3 space-y-2">
+                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 歌曲段落畫面同步！</p>
+                <DownloadChip label="music_slides.pptx" onClick={() => downloadBlob(musicPptxBlob, 'music_slides.pptx')} dark={dark} />
+              </div>
+            )}
+            {step7State.error && <p className={errBox}>{step7State.error}</p>}
           </StepCard>
         </div>
 

@@ -11,7 +11,8 @@
 2. AI 歌詞
 3. Podcast 音訊（WAV）
 4. AI 歌曲音訊（MP3）
-5. 兩份 PPTX 簡報（各內嵌對應音訊，有自動換頁計時）
+5. 解析音頻時間產生 Podcast PPTX 簡報（精準對齊轉場）
+6. 解析音頻時間產生 Music PPTX 簡報（精準對齊轉場）
 
 **架構**：
 - **Frontend**：Next.js App Router，`'use client'` 單頁應用
@@ -129,7 +130,9 @@ pocast2/
 │       ├── generate-script/route.ts
 │       ├── generate-lyrics/route.ts
 │       ├── generate-podcast/route.ts
-│       └── generate-music/route.ts
+│       ├── generate-music/route.ts
+│       ├── align-podcast/route.ts
+│       └── align-music/route.ts
 ├── lib/
 │   ├── constants.ts       ← 所有常數與提示詞
 │   ├── types.ts           ← TypeScript 型別

@@ -141,3 +141,87 @@ export function extractSlideTexts(text: string, slideCount: number): string[] {
     lines.slice(i * perSlide, (i + 1) * perSlide).join('\n')
   );
 }
+
+// AI Timing Normalizer: Safeguards Gemini's estimations, correcting missing slides and forcing total length to match actual audio runtime.
+export function normalizeTimings(
+  aiTimings: { slideIndex: number; durationSec?: number; vocalStartSec?: number }[],
+  slideCount: number,
+  totalDuration: number
+): SlideTimings {
+  if (!aiTimings || aiTimings.length === 0) {
+    return equalDistribution(slideCount, totalDuration);
+  }
+
+  // Legacy fallback: if API returned durationSec instead of vocalStartSec
+  if (aiTimings[0] && aiTimings[0].vocalStartSec === undefined && aiTimings[0].durationSec !== undefined) {
+    const validTimings = [];
+    let sumDuration = 0;
+    for (let i = 1; i <= slideCount; i++) {
+      const hit = aiTimings.find(t => t.slideIndex === i);
+      const dur = hit && hit.durationSec && hit.durationSec > 0 ? hit.durationSec : 10;
+      validTimings.push({ slideIndex: i, durationSec: dur });
+      sumDuration += dur;
+    }
+
+    if (sumDuration <= 0) return equalDistribution(slideCount, totalDuration);
+
+    const timings: SlideTimings = [];
+    let currentSec = 0;
+    for (const t of validTimings) {
+      const ratio = t.durationSec / sumDuration;
+      const scaledDuration = totalDuration * ratio;
+      
+      timings.push({
+        slideIndex: t.slideIndex,
+        startSec: currentSec,
+        endSec: currentSec + scaledDuration,
+        durationSec: Math.max(scaledDuration, 1) // Minimum 1 sec
+      });
+      currentSec += scaledDuration;
+    }
+    return timings;
+  }
+
+  // New strict-point interval alignment
+  const startTimes: number[] = [];
+  for (let i = 1; i <= slideCount; i++) {
+    const hit = aiTimings.find(t => t.slideIndex === i);
+    let st = hit?.vocalStartSec;
+    
+    // Recovery for missing timestamps
+    if (typeof st !== 'number') {
+      st = startTimes.length > 0 ? startTimes[startTimes.length - 1] + 5 : 0;
+    }
+    
+    // Confine to bounds
+    st = Math.max(0, Math.min(st, totalDuration));
+    startTimes.push(st);
+  }
+
+  // Guarantee monotonic increase (avoids negative durations)
+  for (let i = 1; i < startTimes.length; i++) {
+    if (startTimes[i] <= startTimes[i - 1]) {
+      startTimes[i] = Math.min(startTimes[i - 1] + 1, totalDuration); 
+    }
+  }
+
+  // Calculate distinct screen-time durations per slide
+  const timings: SlideTimings = [];
+  for (let i = 0; i < slideCount; i++) {
+    const nextStart = i + 1 < slideCount ? startTimes[i + 1] : totalDuration;
+    
+    // First slide conceptually starts at 0 to endure any instrumental intro
+    const actualStart = i === 0 ? 0 : startTimes[i];
+    const dur = Math.max(nextStart - actualStart, 1);
+    
+    timings.push({
+      slideIndex: i + 1,
+      startSec: actualStart,
+      endSec: actualStart + dur,
+      durationSec: dur
+    });
+  }
+
+  return timings;
+}
+

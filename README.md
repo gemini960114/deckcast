@@ -13,7 +13,8 @@
 3. 生成指定風格的歌詞
 4. 用 AI 語音合成 Podcast 音檔（雙人 TTS）
 5. 用 AI 作曲生成完整歌曲音檔
-6. 輸出兩份 PowerPoint 簡報，換頁時間自動對齊音訊長度
+6. 呼叫 Gemini 分析音頻起點並輸出 Podcast 簡報
+7. 呼叫 Gemini 分析音樂段落並輸出 音樂簡報
 
 所有生成結果可逐一下載，簡報播放時與音訊同步啟動即可對齊。
 
@@ -66,16 +67,16 @@
 - 輸入歌詞（含段落標記），輸出完整歌曲
 - 輸出 `music.mp3`
 
-### PowerPoint 簡報生成（自動換頁）
-- 在瀏覽器端執行，不經過伺服器
-- PDF 每頁渲染為圖片，逐頁嵌入 PPTX
-- 自動設定每頁換頁秒數，與對應音訊時間同步
-- 輸出兩份 PPTX：
+### PowerPoint 簡報生成（AI 精準對齊轉場）
+- 直接使用 Gemini 模型（`gemini-3-flash-preview`）實際聆聽生成的 Podcast `wav` 與 Music `mp3` 音軌。
+- 捨棄舊有「字數除法」的相對猜測，改為直接抓取詞句開始秒數（`vocalStartSec`），確保包括前奏、間奏或突發講話停頓都能被精準捕捉。
+- 若 AI 分配失敗或超時，具備防呆機制退回基於字數的均分邏輯。
+- PDF 每頁透過 Canvas 渲染為圖片，並注入 XML 轉場效果 `<p:fade/>` 到 PPTX 中。
 
 | 檔案 | 換頁時間計算方式 |
 |---|---|
-| `podcast_slides.pptx` | 依文稿字數估算每頁時長 |
-| `music_slides.pptx` | 音樂總時長 ÷ 投影片數量（均分） |
+| `podcast_slides.pptx` | 依據 AI 聆聽逐字稿發生的絕對秒數推算換頁時間 |
+| `music_slides.pptx` | 依據 AI 聆聽歌詞發生的絕對起點推算時間，完美對齊前奏與間奏 |
 
 > 音訊不嵌入 PPTX。下載後將音訊與簡報同時啟動，即可同步播放。
 
@@ -89,8 +90,8 @@
 | `lyrics.txt` | 歌曲歌詞 | 歌詞生成後 |
 | `podcast.wav` | Podcast 音訊 | 音訊生成後 |
 | `music.mp3` | 歌曲音訊 | 音樂生成後 |
-| `podcast_slides.pptx` | Podcast 同步簡報 | 背景 PPTX 生成後 |
-| `music_slides.pptx` | 音樂同步簡報 | 背景 PPTX 生成後 |
+| `podcast_slides.pptx` | Podcast 同步簡報 | Step 6 完成後 |
+| `music_slides.pptx` | 音樂同步簡報 | Step 7 完成後 |
 
 ---
 
@@ -109,7 +110,9 @@ Step 4  生成 Podcast 音訊（約 30–60 秒）
   ↓
 Step 5  生成歌曲音訊（約 30–60 秒）
   ↓
-[背景自動] 計算轉場時間 → 生成兩份 PPTX
+Step 6  AI 聆聽並產生 Podcast 簡報 (精準對齊)
+  ↓
+Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
   ↓
 下載所有檔案
 ```
@@ -154,7 +157,7 @@ Step 5  生成歌曲音訊（約 30–60 秒）
 | 前端 | React（Next.js App Router）+ TypeScript | UI、步驟狀態、IndexedDB 讀寫、PPTX 生成、檔案下載 |
 | 前端核心套件 | `pdfjs-dist` | PDF 每頁渲染為圖片（Stage 1 壓縮預處理 + Stage 7 PPTX 頁面圖片） |
 | 前端核心套件 | `pptxgenjs` | PPTX 生成與每頁自動換頁計時設定 |
-| 後端 | Next.js API Routes | Gemini API Key 安全代理（純 Proxy，不儲存任何資料） |
+| 後端 | Next.js API Routes | Gemini API Key 安全代理、接收 Base64 音頻供 AI 進行時間軸解析，設定 Payload 限制防過載 |
 | AI 服務 | Google Gemini API | 文稿、歌詞、TTS、音樂生成 |
 | 持久化 | 瀏覽器 IndexedDB | 儲存所有生成結果（文字、音訊 Blob、PPTX Blob） |
 
