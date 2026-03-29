@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { MODEL_TEXT, PARSE_PDF_PROMPT } from '@/lib/constants';
+import { MODEL_TEXT } from '@/lib/constants';
+import { PARSE_PDF_PROMPT } from '@/lib/prompts';
 
 export async function POST(req: NextRequest) {
   try {
