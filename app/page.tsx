@@ -558,7 +558,7 @@ export default function Home() {
             <div>
               <label className={labelCls}>歌詞長度</label>
               <select value={lyricsDuration} onChange={e => setLyricsDuration(e.target.value)} className={selectCls}>
-                {LYRICS_DURATIONS.map(d => <option key={d} value={d}>{d}</option>)}
+                {LYRICS_DURATIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
               </select>
             </div>
           </div>

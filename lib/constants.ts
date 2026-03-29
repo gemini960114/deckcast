@@ -1,28 +1,29 @@
 // ===== API Key =====
 export const API_KEY_HEADER = 'X-Gemini-Key';
-export const API_KEY_SEED   = 'pcast-gen-2024';
-export const SESSION_KEY    = 'gemini_key';
+export const API_KEY_SEED = 'pcast-gen-2024';
+export const SESSION_KEY = 'gemini_key';
 
 // ===== Models =====
-export const MODEL_TEXT       = 'gemini-3-flash-preview';
-export const MODEL_MUSIC_PRO  = 'lyria-3-pro-preview';
-export const MODEL_TTS        = 'gemini-2.5-flash-preview-tts';
+export const MODEL_TEXT = 'gemini-3-flash-preview';
+export const MODEL_MUSIC_PRO = 'lyria-3-pro-preview';
+export const MODEL_TTS = 'gemini-2.5-flash-preview-tts';
 
 // ===== Default Settings =====
-export const DEFAULT_SPEAKER1        = '男生為節目主持人';
-export const DEFAULT_SPEAKER2        = '女生為高師大的老師 Mary 老師（具教學經驗，說明清楚）';
-export const DEFAULT_DIALOGUE_STYLE  = '採自然流暢的對話形式，具有節目感與互動感';
-export const DEFAULT_TONE            = '語氣親切、易懂，適合一般聽眾';
-export const DEFAULT_VOICE1          = 'Puck';
-export const DEFAULT_VOICE2          = 'Zephyr';
-export const DEFAULT_STYLE_ID        = 1;
-export const DEFAULT_LYRICS_DURATION = '90-second';
+export const DEFAULT_SPEAKER1 = '男生為節目主持人 阿哲';
+export const DEFAULT_SPEAKER2 = '女生為高師大的老師 Mary 老師（具教學經驗，說明清楚）';
+export const DEFAULT_DIALOGUE_STYLE = '採自然流暢的對話形式，具有節目感與互動感';
+export const DEFAULT_TONE = '語氣親切、易懂，適合一般聽眾';
+export const DEFAULT_VOICE1 = 'Puck';
+export const DEFAULT_VOICE2 = 'Zephyr';
+export const DEFAULT_STYLE_ID = 1;
+export const DEFAULT_LYRICS_DURATION = '105';
 
 // ===== Lyrics Duration =====
-export const LYRICS_FREE_STYLE = 'Free style';
-export const LYRICS_DURATIONS  = [
-  'Free style', '60-second', '90-second',
-  '120-second', '150-second', '180-second',
+export const LYRICS_DURATIONS = [
+  { label: 'Short（精華版）– 60s', value: '60' },
+  { label: 'Standard（主打歌 ⭐）– 105s', value: '105' },
+  { label: 'Full（完整版）– 135s', value: '135' },
+  { label: 'Pro（演唱會版）– 180s', value: '180' }
 ] as const;
 
 /**
