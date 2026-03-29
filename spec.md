@@ -769,7 +769,11 @@ export async function generatePptx(
     let xml = await zip.file(slideFiles[i])?.async('string');
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
-    xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${durationMs}"><p:fade/></p:transition></p:sld>`);
+    
+    // 如果是最後一頁，不需要淡出特效 (保留空的 transition 以維持自動換頁計時功能)
+    const effectXML = i === slideFiles.length - 1 ? '' : '<p:fade/>';
+    
+    xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition></p:sld>`);
     zip.file(slideFiles[i], xml);
   }
 
