@@ -111,7 +111,7 @@ export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
 請依照投影片內容順序發展歌詞，讓整體故事自然流動。
 
 請使用常見歌曲段落（Intro、Verse、Chorus、Bridge）。
-每個段落請標註對應簡報頁碼，例如：[Verse 1] [Slide 2]。
+每個段落請標註對應時間軸與投影片頁碼，例如：[0:00 - 0:10] [Verse 1] [Slide 2]。
 `;
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
