@@ -4,9 +4,9 @@ export const API_KEY_SEED   = 'pcast-gen-2024';
 export const SESSION_KEY    = 'gemini_key';
 
 // ===== Models =====
-export const MODEL_TEXT  = 'gemini-3-flash-preview';
-export const MODEL_MUSIC = 'lyria-3-pro-preview';
-export const MODEL_TTS   = 'gemini-2.5-flash-preview-tts';
+export const MODEL_TEXT       = 'gemini-3-flash-preview';
+export const MODEL_MUSIC_PRO  = 'lyria-3-pro-preview';
+export const MODEL_TTS        = 'gemini-2.5-flash-preview-tts';
 
 // ===== Default Settings =====
 export const DEFAULT_SPEAKER1        = '男生為節目主持人';
@@ -21,9 +21,16 @@ export const DEFAULT_LYRICS_DURATION = '90-second';
 // ===== Lyrics Duration =====
 export const LYRICS_FREE_STYLE = 'Free style';
 export const LYRICS_DURATIONS  = [
-  'Free style', '30-second', '60-second', '90-second',
+  'Free style', '60-second', '90-second',
   '120-second', '150-second', '180-second',
 ] as const;
+
+/**
+ * 回傳對應的 Lyria 3 模型
+ */
+export function getMusicModel(duration: string): string {
+  return MODEL_MUSIC_PRO;
+}
 
 // ===== Voice Sample URL =====
 export const voiceSampleUrl = (name: string) =>

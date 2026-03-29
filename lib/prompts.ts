@@ -1,39 +1,48 @@
 import { LYRICS_FREE_STYLE } from './constants';
 
-// ===== Align Prompts =====
-export const ALIGN_MUSIC_PROMPT = `
-我將提供一首 AI 生成的歌曲音檔，以及其對應的歌詞本（內含「投影片 N」的標記）。
-請化身為專業的 MV 導播，仔細聆聽整首歌的段落結構（前奏、主歌、副歌、間奏等）。
-請精準抓出「每一張投影片的歌詞」在音樂中『開始演唱的精確秒數 (vocalStartSec)』。
+export const GENERATE_MUSIC_SRT = `
+我將提供一首 AI 生成的歌曲音檔，以及其對應的歌詞本（可能內含「投影片 N」或音樂結構標記）。
+請仔細聆聽整首歌發音，比對這份歌詞本，為我產出一份「標準、嚴謹的 .srt 字幕格式」腳本。
 
 嚴格要求：
-1. 你的輸出必須是標準的 JSON 陣列，不可包含 markdown 等其他說明。
-2. 每個物件必須包含 "slideIndex" (編號) 以及 "vocalStartSec" (這張投影片對應的第一句歌詞，在音樂中第一次發聲的精確秒數，允許帶小數點)。
-3. 音樂通常有「前奏」，所以第一張投影片的 vocalStartSec 絕對大於 0（如 15.5）。
-4. 本次對齊法捨棄相對時長，改用「新投影片開始播放的絕對時間點」。請專注聽歌詞發生的當下秒數。
-
-範例輸出格式（務必純 JSON）：
-[
-  { "slideIndex": 1, "vocalStartSec": 15.5 },
-  { "slideIndex": 2, "vocalStartSec": 45.0 }
-]
+1. 你的輸出「必須」一字不漏是原始的純 .srt 格式，不能夾帶任何 markdown 代碼區塊 (不要寫 \`\`\`srt 的包裝)，或是其餘問候語說明詞。
+2. 忽略或清掉任何「投影片 N」、「Speaker」、「Male/Female voice」或是「[Verse 1]」、「[Chorus]」這類不具有演唱意義的段落提示標籤字眼，絕對不要把它們變成字幕。
+3. 把過長的句子分段，確保每句字幕在畫面上短暫且易讀。
+4. SRT 的時間軸格式必須是 00:00:00,000 --> 00:00:00,000。
+5. 【重要】請盡可能精確對齊人聲開始與結束的節拍。如果背景樂器過大導致難以聽清精確的毫秒，請根據歌曲的節奏與段落結構進行合理且平滑的時間推算，切勿隨意捏造與音軌總長度明顯不符的時間。
 `.trim();
 
-export const ALIGN_PODCAST_PROMPT = `
-我將提供一段 Podcast 的完整錄音檔，以及對應的逐字稿（內含「投影片 N」的分節標記）。
-請化身精確的字幕時間軸導播，仔細聆聽這段音頻，並比對逐字稿的內容，分析出每一張投影片的對話內容在錄音檔中『開始說話的精確秒數 (vocalStartSec)』。
+export const GENERATE_PODCAST_SRT = `
+我將提供一段 Podcast 錄音檔，以及其對應的逐字稿（內含「投影片 N」的標記與講者名稱）。
+請仔細聆聽對話細節，並對照我給你的逐字稿，將音檔內容翻譯成「標準、完美的 .srt 格式」對話字幕檔。
 
 嚴格要求：
-1. 你的輸出必須是標準的 JSON 陣列，不可包含 markdown 代碼區塊或其他文字說明。
-2. 陣列內的每個物件務必包含 "slideIndex" (投影片編號) 以及 "vocalStartSec" (這張投影片的第一句話在音頻中開始發聲的精確秒數，數字，可帶小數)。
-3. 若有片頭停頓，第一張投影片的 vocalStartSec 不一定為 0。講者間的停頓會真實反映在下一張 vocalStartSec 的距離上。
+1. 你的輸出「必須」一字不漏是原始的純 .srt 格式文本，不要使用 markdown 語法 (不要包裝在 \`\`\` 裡)，也不要夾帶問候與結論。
+2. 仔細剔除原本逐字稿中的講者標籤 (如 Speaker 1:、Mary老師：、男聲：) 與動作表情提示 (如 [深呼吸]、[大笑])。
+3. 你必須將對話中過長的冗言贅字斷成多組 SRT 短句。一行字幕不要過長。
+4. SRT 每段必須要有序號、精確起訖時間 (格式：00:00:00,000 --> 00:00:00,000) 以及該段台詞。
+`.trim();
 
-範例輸出格式（務必純 JSON）：
+export const FIND_TRANSITIONS_PROMPT = `
+我將給你兩份資料：
+[資料 A] 原始文稿 (內含如「投影片 N：」、「[Verse N]」或「[段落 N]」等明顯換頁/分節結構標記)。
+[資料 B] 對剛剛這份文稿所打好的超準確 SRT 字幕時間軸。
+
+你的任務是：交叉比對這兩份資料，找出原始文稿中「每一張投影片的第一個字/第一句話」，對應在 SRT 字幕檔裡面『何時開始被唸出來 (vocalStartSec)』。
+
+嚴格要求：
+1. 你的輸出必須是一個標準的 JSON 陣列，不可包含 markdown 語法或其他說明字眼。
+2. 每個物件必須包含 "slideIndex" (投影片編號，必須是數字) 以及 "vocalStartSec" (這頁第一句話在 SRT 中開始的秒數，譬如 00:00:15,500 就填 15.5)。
+3. 第 1 張投影片不一定從 0 秒開始。如果有前奏音樂，可能要等 15 秒才會有第一句話被唸出來。
+4. 請窮盡尋找每張投影片的精確時間點。如果沒找到對應的字句，請大膽利用上下文的時間軸進行合理推算。
+
+輸出範例 (絕對不可包含 \`\`\`):
 [
   { "slideIndex": 1, "vocalStartSec": 2.5 },
   { "slideIndex": 2, "vocalStartSec": 30.0 }
 ]
 `.trim();
+
 
 // ===== Parse Prompts =====
 export const PARSE_PDF_PROMPT =
@@ -80,27 +89,35 @@ export function buildPodcastPrompt(vars: {
 }
 
 // ===== Lyrics Prompts =====
-export const LYRICS_PROMPT_FREE = (styleLabel: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，並依照以下投影片內容順序編寫歌詞`;
+export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) => `
+請依照以下投影片內容，為我設計一首總長約 ${totalSec} 秒的歌曲。
+請嚴格依照下方的【雙層結構】輸出，不要夾帶任何其他說明文字。
 
-export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，總長度恰好 ${totalSec} 秒（結束時間 ${endTime}），並依照以下投影片內容順序編寫歌詞。
+【音樂控制層 / Music Control】
+Style: ${styleLabel}
+Mood: [請根據投影片內容，填入 2-3 個英文情緒形容詞，如 nostalgic, energetic]
+Instruments: [請根據風格，填入 2-3 個英文代表樂器，如 acoustic guitar, lo-fi drum]
 
-請使用時間軸格式輸出，精確標註每個段落的起訖時間，格式如下：
+【內容結構層 / Content & Structure】
+[0:00 - 0:10] Intro: [描述開場氛圍]
+[0:10 - 0:40] Verse 1: 
+(在此填入投影片轉換的歌詞...)
 
-[0:00 - 0:10] Intro: 開場氛圍與樂器描述
-[0:10 - 0:40] Verse 1: 歌詞內容...
-[0:40 - 1:00] Chorus: 歌詞內容...
-...
-[最後段落的結束時間必須恰好為 ${endTime}，所有段落加總須等於 ${totalSec} 秒]`;
+[最後段落請盡量落在 ${endTime} 附近，並標註 Outro 淡出作結]
+`.trim();
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
   if (duration === LYRICS_FREE_STYLE) {
-    return LYRICS_PROMPT_FREE(styleLabel);
+    return `幫我創作 ${styleLabel} 風格歌詞，並依照投影片內容編寫。`;
   }
-  const totalSec = parseInt(duration);
+  
+  // 提取數字部分，解析失敗則給予預設值 90 秒
+  const parsedSec = parseInt(duration, 10);
+  const totalSec = isNaN(parsedSec) ? 90 : parsedSec; 
+  
   const mm = Math.floor(totalSec / 60);
   const ss = String(totalSec % 60).padStart(2, '0');
   const endTime = `${mm}:${ss}`;
+  
   return LYRICS_PROMPT_TIMED(styleLabel, totalSec, endTime);
 }

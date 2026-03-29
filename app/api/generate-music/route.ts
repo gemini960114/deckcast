@@ -1,31 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { MODEL_MUSIC } from '@/lib/constants';
+import { getMusicModel } from '@/lib/constants';
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { lyrics } = await req.json();
+    const { lyrics, duration } = await req.json();
+
+    const modelName = getMusicModel(duration ?? '90-second');
 
     const response = await ai.models.generateContent({
-      model: MODEL_MUSIC,
+      model: modelName,
       contents: [{ parts: [{ text: lyrics }] }],
       config: { responseModalities: ['AUDIO', 'TEXT'] },
     });
 
-    console.log('[generate-music] parts:', response.candidates?.[0]?.content?.parts?.map(p =>
-      p.inlineData ? `inlineData(${p.inlineData.mimeType})` : 'text'
-    ));
-
     let audioBase64: string | null = null;
     let audioMimeType = 'audio/mpeg';
-    for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-      if (part.inlineData?.data) {
-        audioBase64 = part.inlineData.data;
+    let metadataText = '';
+
+    // 🌟 關鍵安全解析邏輯：無序遍歷所有 parts
+    const parts = response.candidates?.[0]?.content?.parts || [];
+    for (const part of parts) {
+      if (part.text) {
+        metadataText += part.text + '\n';
+      } else if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/')) {
+        audioBase64 = part.inlineData.data ?? null;
         audioMimeType = part.inlineData.mimeType ?? 'audio/mpeg';
-        break;
       }
     }
 

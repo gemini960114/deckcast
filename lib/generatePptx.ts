@@ -73,10 +73,16 @@ export async function generatePptx(
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
     
-    // 如果是最後一頁，不需要淡出特效 (保留空的 transition 以維持自動換頁計時功能)
-    const effectXML = i === slideFiles.length - 1 ? '' : '<p:fade/>';
+    const isLastSlide = i === slideFiles.length - 1;
+    const effectXML = '<p:fade/>'; // 全部都有淡化特效
     
-    xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition></p:sld>`);
+    if (isLastSlide) {
+      // 最後一頁不需要設定自動換頁，僅保留進場的特效
+      xml = xml.replace('</p:sld>', `<p:transition spd="med">${effectXML}</p:transition></p:sld>`);
+    } else {
+      // 其他投影片到了指定秒數自動換頁
+      xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition></p:sld>`);
+    }
     zip.file(slideFiles[i], xml);
   }
 

@@ -34,37 +34,37 @@ async function blobToBase64(blob: Blob): Promise<string> {
 // ── theme tokens ──
 function useTheme(dark: boolean) {
   return {
-    page:       dark ? 'bg-slate-900 text-slate-200'       : 'bg-slate-100 text-slate-800',
-    header:     dark ? 'bg-slate-900/90 border-slate-700'  : 'bg-white/90 border-slate-200',
-    card:       dark ? 'bg-slate-800 border-slate-700'     : 'bg-white border-slate-200',
-    cardDone:   dark ? 'bg-slate-800 border-emerald-700'   : 'bg-white border-emerald-600',
-    cardLoad:   dark ? 'bg-slate-800 border-emerald-600'   : 'bg-white border-emerald-500',
-    cardErr:    dark ? 'bg-slate-800 border-red-500'       : 'bg-white border-red-400',
-    inner:      dark ? 'bg-slate-900 border-slate-700'     : 'bg-slate-50 border-slate-100',
-    input:      dark ? 'bg-slate-900 border-slate-600 text-slate-200 placeholder:text-slate-600' : 'bg-white border-slate-200 text-slate-700 placeholder:text-slate-300',
-    select:     dark ? 'bg-slate-900 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-100 text-slate-700',
-    label:      dark ? 'text-slate-500' : 'text-slate-400',
-    muted:      dark ? 'text-slate-400' : 'text-slate-500',
-    faint:      dark ? 'text-slate-500' : 'text-slate-400',
-    text:       dark ? 'text-slate-200' : 'text-slate-700',
-    heading:    dark ? 'text-slate-100' : 'text-slate-800',
-    green:      dark ? 'text-emerald-400' : 'text-emerald-700',
-    greenBg:    dark ? 'bg-emerald-900/40 border-emerald-800' : 'bg-emerald-50 border-emerald-200',
-    greenChip:  dark ? 'bg-emerald-900/50 text-emerald-400 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200',
-    badge:      dark ? 'bg-emerald-700 text-white' : 'bg-emerald-700 text-white',
-    badgeLoad:  dark ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white',
-    badgeErr:   dark ? 'bg-red-600 text-white'     : 'bg-red-500 text-white',
-    badgeIdle:  dark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500',
-    mono:       dark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600',
-    drawer:     dark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-100',
+    page: dark ? 'bg-slate-900 text-slate-200' : 'bg-slate-100 text-slate-800',
+    header: dark ? 'bg-slate-900/90 border-slate-700' : 'bg-white/90 border-slate-200',
+    card: dark ? 'bg-slate-800 border-slate-700' : 'bg-white border-slate-200',
+    cardDone: dark ? 'bg-slate-800 border-emerald-700' : 'bg-white border-emerald-600',
+    cardLoad: dark ? 'bg-slate-800 border-emerald-600' : 'bg-white border-emerald-500',
+    cardErr: dark ? 'bg-slate-800 border-red-500' : 'bg-white border-red-400',
+    inner: dark ? 'bg-slate-900 border-slate-700' : 'bg-slate-50 border-slate-100',
+    input: dark ? 'bg-slate-900 border-slate-600 text-slate-200 placeholder:text-slate-600' : 'bg-white border-slate-200 text-slate-700 placeholder:text-slate-300',
+    select: dark ? 'bg-slate-900 border-slate-600 text-slate-200' : 'bg-slate-50 border-slate-100 text-slate-700',
+    label: dark ? 'text-slate-500' : 'text-slate-400',
+    muted: dark ? 'text-slate-400' : 'text-slate-500',
+    faint: dark ? 'text-slate-500' : 'text-slate-400',
+    text: dark ? 'text-slate-200' : 'text-slate-700',
+    heading: dark ? 'text-slate-100' : 'text-slate-800',
+    green: dark ? 'text-emerald-400' : 'text-emerald-700',
+    greenBg: dark ? 'bg-emerald-900/40 border-emerald-800' : 'bg-emerald-50 border-emerald-200',
+    greenChip: dark ? 'bg-emerald-900/50 text-emerald-400 border-emerald-800' : 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    badge: dark ? 'bg-emerald-700 text-white' : 'bg-emerald-700 text-white',
+    badgeLoad: dark ? 'bg-emerald-600 text-white' : 'bg-emerald-600 text-white',
+    badgeErr: dark ? 'bg-red-600 text-white' : 'bg-red-500 text-white',
+    badgeIdle: dark ? 'bg-slate-700 text-slate-400' : 'bg-slate-200 text-slate-500',
+    mono: dark ? 'bg-slate-900 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-100 text-slate-600',
+    drawer: dark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-100',
     drawerItem: dark ? 'bg-slate-800 border-slate-700 hover:border-emerald-700' : 'bg-slate-50 border-slate-100 hover:border-emerald-300',
-    dropzone:   dark ? 'border-slate-600 hover:border-emerald-600 hover:bg-emerald-900/20' : 'border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40',
+    dropzone: dark ? 'border-slate-600 hover:border-emerald-600 hover:bg-emerald-900/20' : 'border-slate-200 hover:border-emerald-500 hover:bg-emerald-50/40',
     dlBtn: (avail: boolean, load: boolean) =>
       avail ? (dark ? 'bg-slate-700 text-emerald-400 border-slate-600 hover:bg-emerald-700 hover:text-white hover:border-emerald-700'
-                    : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-700 hover:text-white hover:border-emerald-700')
-            : load ? 'bg-amber-900/30 text-amber-400 border-amber-800/50 animate-pulse cursor-wait'
-                   : (dark ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed'
-                            : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'),
+        : 'bg-white text-emerald-700 border-emerald-200 hover:bg-emerald-700 hover:text-white hover:border-emerald-700')
+        : load ? 'bg-amber-900/30 text-amber-400 border-amber-800/50 animate-pulse cursor-wait'
+          : (dark ? 'bg-slate-800 text-slate-600 border-slate-700 cursor-not-allowed'
+            : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'),
   };
 }
 
@@ -75,13 +75,13 @@ function StepCard({ step, title, state, children, disabled, dark }: {
 }) {
   const t = useTheme(dark);
   const border =
-    state.status === 'done'    ? t.cardDone :
-    state.status === 'loading' ? t.cardLoad :
-    state.status === 'error'   ? t.cardErr  : t.card;
+    state.status === 'done' ? t.cardDone :
+      state.status === 'loading' ? t.cardLoad :
+        state.status === 'error' ? t.cardErr : t.card;
   const badge =
-    state.status === 'done'    ? t.badge :
-    state.status === 'loading' ? t.badgeLoad :
-    state.status === 'error'   ? t.badgeErr  : t.badgeIdle;
+    state.status === 'done' ? t.badge :
+      state.status === 'loading' ? t.badgeLoad :
+        state.status === 'error' ? t.badgeErr : t.badgeIdle;
 
   return (
     <div className={`rounded-2xl border-2 ${border} shadow-sm p-5 transition-all duration-300 ${disabled ? 'opacity-40 pointer-events-none' : ''}`}>
@@ -171,10 +171,9 @@ function ActionBtn({ onClick, disabled, children }: { onClick: () => void; disab
 function DownloadChip({ label, onClick, dark }: { label: string; onClick: () => void; dark: boolean }) {
   return (
     <button onClick={onClick}
-      className={`inline-flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-full border transition-all ${
-        dark ? 'text-emerald-400 bg-emerald-900/30 border-emerald-800 hover:bg-emerald-800/60'
-             : 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
-      }`}>
+      className={`inline-flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-full border transition-all ${dark ? 'text-emerald-400 bg-emerald-900/30 border-emerald-800 hover:bg-emerald-800/60'
+          : 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+        }`}>
       <span style={{ fontSize: 12 }}>↓</span>{label}
     </button>
   );
@@ -202,6 +201,8 @@ export default function Home() {
   const [musicBlob, setMusicBlob] = useState<Blob | null>(null);
   const [podcastPptxBlob, setPodcastPptxBlob] = useState<Blob | null>(null);
   const [musicPptxBlob, setMusicPptxBlob] = useState<Blob | null>(null);
+  const [podcastSrt, setPodcastSrt] = useState<string>('');
+  const [musicSrt, setMusicSrt] = useState<string>('');
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
@@ -259,9 +260,9 @@ export default function Home() {
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      
-      if (pdfDoc.numPages < 5 || pdfDoc.numPages > 10) {
-        const msg = '請上傳 5-10 頁的範圍簡報檔案';
+
+      if (pdfDoc.numPages < 3 || pdfDoc.numPages > 10) {
+        const msg = '請上傳 3-10 頁的範圍簡報檔案';
         setStep1State({ status: 'error', error: msg });
         setToast(msg);
         return;
@@ -290,67 +291,70 @@ export default function Home() {
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
 
-  async function handleGenerateLyrics() {
-    if (!script) return; setStep3State({ status: 'loading' });
-    try {
-      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); setLyrics(data.lyrics); setStep3State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '' });
-      setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
-    } catch (e) { setStep3State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
-  }
-
   async function handleGeneratePodcast() {
-    if (!script) return; setStep4State({ status: 'loading' });
+    if (!script) return; setStep3State({ status: 'loading' });
     try {
       const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2 });
       if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob(); setPodcastBlob(blob); setStep4State({ status: 'done' });
+      const blob = await res.blob(); setPodcastBlob(blob); setStep3State({ status: 'done' });
       if (recordId) await updateRecord(recordId, { podcastBlob: blob, voice1, voice2 });
-      setTimeout(() => step5Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
-    } catch (e) { setStep4State({ status: 'error', error: String(e) }); setToast('Podcast 音訊生成失敗：' + String(e)); }
-  }
-
-  async function handleGenerateMusic() {
-    if (!lyrics) return; setStep5State({ status: 'loading' });
-    try {
-      const res = await apiFetch('/api/generate-music', { lyrics, styleId });
-      if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob(); setMusicBlob(blob); setStep5State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicBlob: blob });
-      setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
-    } catch (e) {
-      const msg = String(e); const isBlocked = msg.includes('PROHIBITED_CONTENT');
-      setStep5State({ status: 'error', error: isBlocked ? 'PROHIBITED_CONTENT：歌詞觸發內容審核，請重新生成歌詞後再試' : msg });
-      setToast(isBlocked ? '歌詞觸發內容審核，請重新生成歌詞' : '音樂生成失敗：' + msg);
-    }
+      setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    } catch (e) { setStep3State({ status: 'error', error: String(e) }); setToast('Podcast 音訊生成失敗：' + String(e)); }
   }
 
   async function handleGeneratePodcastPptx() {
     if (!podcastBlob || !script || !pdfFile) return;
-    setStep6State({ status: 'loading' });
+    setStep4State({ status: 'loading' });
     try {
-      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 5;
+      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
       const audioBase64 = await blobToBase64(podcastBlob);
       const duration = await getAudioDuration(podcastBlob);
-      
+
       const res = await apiFetch('/api/align-podcast', { script, audioBase64 });
       let timings;
+      let srt = '';
       if (res.ok) {
         const data = await res.json();
         timings = normalizeTimings(data.timings, slideCount, duration);
+        srt = data.srt ?? '';
       } else {
         console.warn('API align-podcast failed, falling back to heuristic calculation.', await res.text());
         timings = await calcPodcastTimings(script, slideCount, podcastBlob);
       }
 
       const pptx = await generatePptx(pdfFile, timings, podcastBlob);
-      setPodcastPptxBlob(pptx); setStep6State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx });
+      setPodcastPptxBlob(pptx); setPodcastSrt(srt); setStep4State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx, podcastSrt: srt });
       setToast('Podcast 簡報已生成！'); loadHistory();
+      setTimeout(() => step5Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
-      setStep6State({ status: 'error', error: String(e) }); setToast('Podcast 簡報生成失敗：' + String(e));
+      setStep4State({ status: 'error', error: String(e) }); setToast('Podcast 簡報生成失敗：' + String(e));
+    }
+  }
+
+  async function handleGenerateLyrics() {
+    if (!script) return; setStep5State({ status: 'loading' });
+    try {
+      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '' });
+      setTimeout(() => step6Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    } catch (e) { setStep5State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
+  }
+
+  async function handleGenerateMusic() {
+    if (!lyrics) return; setStep6State({ status: 'loading' });
+    try {
+      const res = await apiFetch('/api/generate-music', { lyrics, styleId, duration: lyricsDuration });
+      if (!res.ok) throw new Error(await res.text());
+      const blob = await res.blob(); setMusicBlob(blob); setStep6State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicBlob: blob });
+      setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    } catch (e) {
+      const msg = String(e); const isBlocked = msg.includes('PROHIBITED_CONTENT');
+      setStep6State({ status: 'error', error: isBlocked ? 'PROHIBITED_CONTENT：歌詞觸發內容審核，請重新生成歌詞後再試' : msg });
+      setToast(isBlocked ? '歌詞觸發內容審核，請重新生成歌詞' : '音樂生成失敗：' + msg);
     }
   }
 
@@ -358,23 +362,25 @@ export default function Home() {
     if (!musicBlob || !lyrics || !pdfFile) return;
     setStep7State({ status: 'loading' });
     try {
-      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 5;
+      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
       const audioBase64 = await blobToBase64(musicBlob);
       const duration = await getAudioDuration(musicBlob);
-      
+
       const res = await apiFetch('/api/align-music', { lyrics, audioBase64 });
       let timings;
+      let srt = '';
       if (res.ok) {
         const data = await res.json();
         timings = normalizeTimings(data.timings, slideCount, duration);
+        srt = data.srt ?? '';
       } else {
         console.warn('API align-music failed, falling back to heuristic calculation.', await res.text());
         timings = await calcMusicTimings(slideCount, musicBlob, lyrics);
       }
 
       const pptx = await generatePptx(pdfFile, timings, musicBlob);
-      setMusicPptxBlob(pptx); setStep7State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx });
+      setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx, musicSrt: srt });
       setToast('音樂簡報已生成！'); loadHistory();
     } catch (e) {
       setStep7State({ status: 'error', error: String(e) }); setToast('音樂簡報生成失敗：' + String(e));
@@ -387,13 +393,15 @@ export default function Home() {
     if (rec.voice1) setVoice1(rec.voice1); if (rec.voice2) setVoice2(rec.voice2);
     if (rec.styleId) setStyleId(rec.styleId); if (rec.lyricsDuration) setLyricsDuration(rec.lyricsDuration);
     if (rec.pdfBlob) setPdfFile(new File([rec.pdfBlob], rec.pdfName, { type: 'application/pdf' }));
-    if (rec.slides)          { setSlides(rec.slides);           setStep1State({ status: 'done' }); }
-    if (rec.script)          { setScript(rec.script);           setStep2State({ status: 'done' }); }
-    if (rec.lyrics)          { setLyrics(rec.lyrics);           setStep3State({ status: 'done' }); }
-    if (rec.podcastBlob)     { setPodcastBlob(rec.podcastBlob); setStep4State({ status: 'done' }); }
-    if (rec.musicBlob)       { setMusicBlob(rec.musicBlob);     setStep5State({ status: 'done' }); }
-    if (rec.podcastPptxBlob) setPodcastPptxBlob(rec.podcastPptxBlob);
-    if (rec.musicPptxBlob)   setMusicPptxBlob(rec.musicPptxBlob);
+    if (rec.slides) { setSlides(rec.slides); setStep1State({ status: 'done' }); }
+    if (rec.script) { setScript(rec.script); setStep2State({ status: 'done' }); }
+    if (rec.podcastBlob) { setPodcastBlob(rec.podcastBlob); setStep3State({ status: 'done' }); }
+    if (rec.podcastPptxBlob) { setPodcastPptxBlob(rec.podcastPptxBlob); setStep4State({ status: 'done' }); }
+    if (rec.lyrics) { setLyrics(rec.lyrics); setStep5State({ status: 'done' }); }
+    if (rec.musicBlob) { setMusicBlob(rec.musicBlob); setStep6State({ status: 'done' }); }
+    if (rec.musicPptxBlob) { setMusicPptxBlob(rec.musicPptxBlob); setStep7State({ status: 'done' }); }
+    if (rec.podcastSrt) setPodcastSrt(rec.podcastSrt); else setPodcastSrt('');
+    if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
     setRecordId(rec.id); setDrawerOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' }); setToast(`已載入：${rec.pdfName}`);
   }
@@ -401,8 +409,9 @@ export default function Home() {
   function handleNewProject() {
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
+    setPodcastSrt(''); setMusicSrt('');
     setStep1State({ status: 'idle' }); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
-    setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' }); 
+    setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
     setPptxLoading(false); setRecordId('');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -444,12 +453,12 @@ export default function Home() {
           <div className="flex items-center gap-2">
             {/* Logo icon */}
             <svg width="28" height="28" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" className="flex-shrink-0">
-              <rect width="32" height="32" rx="7" fill="#047857"/>
-              <rect x="4" y="9" width="15" height="11" rx="2" fill="white"/>
-              <rect x="6" y="12" width="8" height="1.5" rx="0.75" fill="#047857" opacity="0.45"/>
-              <rect x="6" y="15" width="5" height="1.5" rx="0.75" fill="#047857" opacity="0.45"/>
-              <path d="M22 13.5 Q25.5 16 22 18.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/>
-              <path d="M24.5 11 Q29.5 16 24.5 21" stroke="white" strokeWidth="1.8" fill="none" strokeLinecap="round" opacity="0.55"/>
+              <rect width="32" height="32" rx="7" fill="#047857" />
+              <rect x="4" y="9" width="15" height="11" rx="2" fill="white" />
+              <rect x="6" y="12" width="8" height="1.5" rx="0.75" fill="#047857" opacity="0.45" />
+              <rect x="6" y="15" width="5" height="1.5" rx="0.75" fill="#047857" opacity="0.45" />
+              <path d="M22 13.5 Q25.5 16 22 18.5" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round" />
+              <path d="M24.5 11 Q29.5 16 24.5 21" stroke="white" strokeWidth="1.8" fill="none" strokeLinecap="round" opacity="0.55" />
             </svg>
             <div>
               <span className={`text-sm font-extrabold tracking-tight ${t.green}`}
@@ -464,19 +473,17 @@ export default function Home() {
             <button
               onClick={() => setDark(d => !d)}
               title={dark ? '切換白天模式' : '切換夜晚模式'}
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-base border transition-all ${
-                dark ? 'bg-slate-700 border-slate-600 hover:bg-slate-600' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'
-              }`}
+              className={`w-8 h-8 rounded-full flex items-center justify-center text-base border transition-all ${dark ? 'bg-slate-700 border-slate-600 hover:bg-slate-600' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'
+                }`}
             >{dark ? '☀️' : '🌙'}</button>
             <button onClick={handleNewProject}
               className="text-[11px] font-bold text-white emerald-gradient px-4 py-1.5 rounded-full shadow-sm shadow-emerald-900/30 active:scale-95 transition-all">
               ＋ 新專案
             </button>
             <button onClick={() => { setDrawerOpen(true); loadHistory(); }}
-              className={`text-[11px] font-semibold border rounded-full px-4 py-1.5 transition-all ${
-                dark ? 'text-slate-400 border-slate-600 hover:text-emerald-400 hover:border-emerald-700'
-                     : 'text-slate-500 border-slate-200 hover:text-emerald-700 hover:border-emerald-400'
-              }`}>
+              className={`text-[11px] font-semibold border rounded-full px-4 py-1.5 transition-all ${dark ? 'text-slate-400 border-slate-600 hover:text-emerald-400 hover:border-emerald-700'
+                  : 'text-slate-500 border-slate-200 hover:text-emerald-700 hover:border-emerald-400'
+                }`}>
               歷史紀錄
             </button>
           </div>
@@ -560,9 +567,8 @@ export default function Home() {
         {/* ── Step 1: Upload PDF ── */}
         <StepCard step={1} title="上傳 PDF" state={step1State} dark={dark}>
           <div
-            className={`border-2 border-dashed rounded-2xl p-7 text-center cursor-pointer transition-all ${
-              dragging ? 'border-emerald-600 bg-emerald-900/10' : t.dropzone
-            }`}
+            className={`border-2 border-dashed rounded-2xl p-7 text-center cursor-pointer transition-all ${dragging ? 'border-emerald-600 bg-emerald-900/10' : t.dropzone
+              }`}
             onClick={() => document.getElementById('pdf-input')?.click()}
           >
             <input id="pdf-input" type="file" accept=".pdf" className="hidden"
@@ -583,7 +589,7 @@ export default function Home() {
                   <span className="text-xl">📄</span>
                 </div>
                 <p className={`text-xs font-semibold ${t.muted}`}>拖拽或點擊上傳 PDF</p>
-                <p className={`text-[11px] ${t.faint}`}>建議 5–10 頁</p>
+                <p className={`text-[11px] ${t.faint}`}>建議 3–10 頁</p>
               </div>
             )}
           </div>
@@ -615,14 +621,14 @@ export default function Home() {
 
         {/* ── Step 3 ── */}
         <div ref={step3Ref}>
-          <StepCard step={3} title="生成歌詞" state={step3State} disabled={!script} dark={dark}>
+          <StepCard step={3} title="生成 Podcast 音訊" state={step3State} disabled={!script} dark={dark}>
             {step3State.status === 'loading'
-              ? <LoadingBar message="正在生成歌詞..." dark={dark} />
-              : <ActionBtn onClick={handleGenerateLyrics}>{step3State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
-            {lyrics && step3State.status === 'done' && (
+              ? <LoadingBar message="正在生成雙人 TTS 音訊（約 30–60 秒）..." dark={dark} />
+              : <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>}
+            {podcastBlob && step3State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <TextBlock text={lyrics} dark={dark} />
-                <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, 'lyrics.txt')} dark={dark} />
+                <AudioPlayer blob={podcastBlob} label="Podcast 音訊" dark={dark} />
+                <DownloadChip label="podcast.wav" onClick={() => downloadBlob(podcastBlob, 'podcast.mp3')} dark={dark} />
               </div>
             )}
             {step3State.error && <p className={errBox}>{step3State.error}</p>}
@@ -631,55 +637,56 @@ export default function Home() {
 
         {/* ── Step 4 ── */}
         <div ref={step4Ref}>
-          <StepCard step={4} title="生成 Podcast 音訊" state={step4State} disabled={!script} dark={dark}>
+          <StepCard step={4} title="生成 Podcast 簡報 (AI 精準對齊)" state={step4State} disabled={!podcastBlob} dark={dark}>
             {step4State.status === 'loading'
-              ? <LoadingBar message="正在生成雙人 TTS 音訊（約 30–60 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGeneratePodcast}>{step4State.status === 'done' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>}
-            {podcastBlob && step4State.status === 'done' && (
+              ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
+              : <ActionBtn onClick={handleGeneratePodcastPptx}>{step4State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>}
+            {podcastPptxBlob && step4State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <AudioPlayer blob={podcastBlob} label="Podcast 音訊" dark={dark} />
-                <DownloadChip label="podcast.wav" onClick={() => downloadBlob(podcastBlob, 'podcast.mp3')} dark={dark} />
+                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
+                <DownloadChip label="podcast_slides.pptx" onClick={() => downloadBlob(podcastPptxBlob, 'podcast_slides.pptx')} dark={dark} />
+                {podcastSrt && <DownloadChip label="podcast.srt" onClick={() => downloadText(podcastSrt, 'podcast.srt')} dark={dark} />}
               </div>
             )}
             {step4State.error && <p className={errBox}>{step4State.error}</p>}
           </StepCard>
         </div>
 
-        {/* ── Step 6 ── */}
-        <div ref={step6Ref}>
-          <StepCard step={6} title="生成 Podcast 簡報 (AI 精準對齊)" state={step6State} disabled={!podcastBlob} dark={dark}>
-            {step6State.status === 'loading'
-              ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGeneratePodcastPptx}>{step6State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>}
-            {podcastPptxBlob && step6State.status === 'done' && (
+        {/* ── Step 5 ── */}
+        <div ref={step5Ref}>
+          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script} dark={dark}>
+            {step5State.status === 'loading'
+              ? <LoadingBar message="正在生成歌詞..." dark={dark} />
+              : <ActionBtn onClick={handleGenerateLyrics}>{step5State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
+            {lyrics && step5State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
-                <DownloadChip label="podcast_slides.pptx" onClick={() => downloadBlob(podcastPptxBlob, 'podcast_slides.pptx')} dark={dark} />
+                <TextBlock text={lyrics} dark={dark} />
+                <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, 'lyrics.txt')} dark={dark} />
               </div>
             )}
-            {step6State.error && <p className={errBox}>{step6State.error}</p>}
+            {step5State.error && <p className={errBox}>{step5State.error}</p>}
           </StepCard>
         </div>
 
-        {/* ── Step 5 ── */}
-        <div ref={step5Ref}>
-          <StepCard step={5} title="生成歌曲音訊" state={step5State} disabled={!lyrics} dark={dark}>
-            {step5State.status === 'loading'
+        {/* ── Step 6 ── */}
+        <div ref={step6Ref}>
+          <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics} dark={dark}>
+            {step6State.status === 'loading'
               ? <LoadingBar message="正在生成 AI 歌曲（約 30–60 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGenerateMusic}>{step5State.status === 'done' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>}
-            {musicBlob && step5State.status === 'done' && (
+              : <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>}
+            {musicBlob && step6State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <AudioPlayer blob={musicBlob} label="AI 歌曲" dark={dark} />
                 <DownloadChip label="music.mp3" onClick={() => downloadBlob(musicBlob, 'music.mp3')} dark={dark} />
               </div>
             )}
-            {step5State.error && (
+            {step6State.error && (
               <div className="mt-3 space-y-2">
-                <p className={errBox}>{step5State.error}</p>
-                {step5State.error.includes('PROHIBITED_CONTENT') && (
-                  <button onClick={() => { setStep3State({ status: 'idle' }); setLyrics(''); step3Ref.current?.scrollIntoView({ behavior: 'smooth' }); }}
+                <p className={errBox}>{step6State.error}</p>
+                {step6State.error.includes('PROHIBITED_CONTENT') && (
+                  <button onClick={() => { setStep5State({ status: 'idle' }); setLyrics(''); step5Ref.current?.scrollIntoView({ behavior: 'smooth' }); }}
                     className={`text-[11px] font-bold px-4 py-2 rounded-full transition-all ${dark ? 'bg-amber-900/40 text-amber-400 hover:bg-amber-900/60' : 'bg-amber-100 text-amber-700 hover:bg-amber-200'}`}>
-                    ↩ 回到 Step 3 重新生成歌詞
+                    ↩ 回到 Step 5 重新生成歌詞
                   </button>
                 )}
               </div>
@@ -697,6 +704,7 @@ export default function Home() {
               <div className="mt-3 space-y-2">
                 <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 歌曲段落畫面同步！</p>
                 <DownloadChip label="music_slides.pptx" onClick={() => downloadBlob(musicPptxBlob, 'music_slides.pptx')} dark={dark} />
+                {musicSrt && <DownloadChip label="music.srt" onClick={() => downloadText(musicSrt, 'music.srt')} dark={dark} />}
               </div>
             )}
             {step7State.error && <p className={errBox}>{step7State.error}</p>}
@@ -717,9 +725,11 @@ export default function Home() {
               <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>📄 文字</p>
               <div className="grid grid-cols-3 gap-2">
                 {[
-                  { label: 'slides.txt',  avail: !!slides, fn: () => slides && downloadText(slides, 'slides.txt') },
-                  { label: 'script.txt',  avail: !!script, fn: () => script && downloadText(script, 'script.txt') },
-                  { label: 'lyrics.txt',  avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, 'lyrics.txt') },
+                  { label: 'slides.txt', avail: !!slides, fn: () => slides && downloadText(slides, 'slides.txt') },
+                  { label: 'script.txt', avail: !!script, fn: () => script && downloadText(script, 'script.txt') },
+                  { label: 'lyrics.txt', avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, 'lyrics.txt') },
+                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(podcastSrt, 'podcast.srt') },
+                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(musicSrt, 'music.srt') },
                 ].map(({ label, avail, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, false)}`}>
@@ -734,8 +744,8 @@ export default function Home() {
               <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>🎧 音訊</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'podcast.wav', avail: !!podcastBlob, load: false,       fn: () => podcastBlob && downloadBlob(podcastBlob, 'podcast.mp3') },
-                  { label: 'music.mp3',   avail: !!musicBlob,   load: false,       fn: () => musicBlob && downloadBlob(musicBlob, 'music.mp3') },
+                  { label: 'podcast.wav', avail: !!podcastBlob, load: false, fn: () => podcastBlob && downloadBlob(podcastBlob, 'podcast.mp3') },
+                  { label: 'music.mp3', avail: !!musicBlob, load: false, fn: () => musicBlob && downloadBlob(musicBlob, 'music.mp3') },
                 ].map(({ label, avail, load, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail && !load}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, load)}`}>
@@ -751,7 +761,7 @@ export default function Home() {
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: 'podcast_slides.pptx', avail: !!podcastPptxBlob, load: pptxLoading, fn: () => podcastPptxBlob && downloadBlob(podcastPptxBlob, 'podcast_slides.pptx') },
-                  { label: 'music_slides.pptx',   avail: !!musicPptxBlob,   load: pptxLoading, fn: () => musicPptxBlob && downloadBlob(musicPptxBlob, 'music_slides.pptx') },
+                  { label: 'music_slides.pptx', avail: !!musicPptxBlob, load: pptxLoading, fn: () => musicPptxBlob && downloadBlob(musicPptxBlob, 'music_slides.pptx') },
                 ].map(({ label, avail, load, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail && !load}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, load)}`}>
@@ -799,6 +809,8 @@ export default function Home() {
                       {rec.musicBlob && <button onClick={() => downloadBlob(rec.musicBlob!, 'music.mp3')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music</button>}
                       {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, 'podcast_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
                       {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, 'music_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
+                      {rec.podcastSrt && <button onClick={() => downloadText(rec.podcastSrt!, 'podcast.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
+                      {rec.musicSrt && <button onClick={() => downloadText(rec.musicSrt!, 'music.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
                       <button onClick={() => { deleteRecord(rec.id); loadHistory(); }}
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ml-auto ${dark ? 'text-red-400 bg-red-900/30 hover:bg-red-900/50' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>刪除</button>
                     </div>

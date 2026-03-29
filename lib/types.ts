@@ -30,6 +30,8 @@ export interface GenerationRecord {
   musicBlob?: Blob;
   podcastPptxBlob?: Blob;
   musicPptxBlob?: Blob;
+  podcastSrt?: string;
+  musicSrt?: string;
 }
 
 export interface StepState {

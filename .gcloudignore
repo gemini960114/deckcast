@@ -35,7 +35,8 @@ desktop.ini
 
 # ── Docs & specs (非必要) ──
 README.md
-spec.md
+SPEC.md
+TODOLIST.md
 
 # ── Design assets (已刪除但防呆) ──
 stitch_ai_creator_home_variant_1*/

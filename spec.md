@@ -1,6 +1,12 @@
-# Podcast & Music Generator — spec_v02
+# Podcast & Music Generator — spec_v03
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
+
+### ✨ v03 架構升級亮點：
+1. **精準 AI 對齊生成 (Two-step SRT)**：揚棄舊版基於字數粗略除法的時長猜測，改由 Gemini 3 直接聽取 Podcast 或歌曲音檔，生成絕對時間的文字，並透過 `normalizeTimings` 計算 `<p:transition>` 秒數，達成跨投影片的完美對齊。
+2. **Lyria 3 API 解析防呆與模型簡化**：徹底移除了 `30-second` 預設模型，目前全盤統一傳遞給 Lyria 3 Pro 模型。後端解析 response 時採用了「無序物件遍歷」，確保無論 Google API 的 `text` 或 `audio/mp3` 在 `parts` 陣列中的哪個位置全都能安全讀取。
+3. **雙層歌詞提示詞 (Dual-Layer Prompt)**：改寫了歌詞生成提示詞，強制輸出包含【音樂風格控制層】與含有精準分秒時間戳記的【結構描述層】，同時防範了 SRT 計算長度時的幻覺。
+4. **簡報特效優化與範圍放寬**：PDF 上傳範圍已放寬為 **3-10 張**。所有簡報換頁皆加入 XML `<p:fade/>` 淡化效果，且特別處理了「最後一頁關閉自動換頁」，防止播放結束直接跳掉黑屏。
 
 ---
 
@@ -289,7 +295,7 @@ export const DEFAULT_LYRICS_DURATION = 'Free style';
 
 export const LYRICS_FREE_STYLE = 'Free style';
 export const LYRICS_DURATIONS  = [
-  'Free style', '30-second', '60-second', '90-second',
+  'Free style', '60-second', '90-second',
   '120-second', '150-second', '180-second',
 ] as const;
 
@@ -1130,7 +1136,7 @@ async function handlePdfUpload(file: File) {
     const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
     if (pdfDoc.numPages < 5 || pdfDoc.numPages > 10) {
-      const msg = '請上傳 5-10 頁的範圍簡報檔案';
+      const msg = '請上傳 3-10 頁的範圍簡報檔案';
       setStep1State({ status: 'error', error: msg });
       setToast(msg);
       return;
@@ -1471,7 +1477,7 @@ Step 5：/api/generate-music → Lyria → MP3
 為防止惡意使用者上傳百頁以上的大型文獻檔，耗盡使用者的 Gemini Token 額度，在 `app/page.tsx` 實作前端邊界攔截：
 1. **副檔名與 Type 檢查**：非 PDF 拒絕上傳。
 2. **CDN 套件頁數檢查**：透過動態載入的 WebpackIgnore 版 `pdfjs-dist` 預先讀取檔案陣列 (`ArrayBuffer`) 解析 `numPages`。
-3. **5–10 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
+3. **3–10 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
 
 ---
 

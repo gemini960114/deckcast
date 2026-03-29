@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { MODEL_TEXT } from '@/lib/constants';
-import { ALIGN_PODCAST_PROMPT } from '@/lib/prompts';
+import { GENERATE_PODCAST_SRT, FIND_TRANSITIONS_PROMPT } from '@/lib/prompts';
 
 export const maxDuration = 300;
 
@@ -16,11 +16,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Missing script or audio data' }, { status: 400 });
     }
 
-    const response = await ai.models.generateContent({
+    // ----- Phase 1: AI generates sentence-by-sentence SRT -----
+    const srtResponse = await ai.models.generateContent({
       model: MODEL_TEXT,
       contents: [{
         parts: [
-          { text: ALIGN_PODCAST_PROMPT },
+          { text: GENERATE_PODCAST_SRT },
           { text: `\n\n=== 逐字稿 ===\n${script}\n================\n` },
           {
             inlineData: {
@@ -29,18 +30,32 @@ export async function POST(req: NextRequest) {
             }
           }
         ]
+      }]
+    });
+
+    const rawSrt = srtResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    const srt = rawSrt.replace(/```srt/gi, '').replace(/```/g, '').trim();
+
+    // ----- Phase 2: AI finds slide transitions from Text + SRT -----
+    const timingResponse = await ai.models.generateContent({
+      model: MODEL_TEXT,
+      contents: [{
+        parts: [
+          { text: FIND_TRANSITIONS_PROMPT },
+          { text: `\n\n=== [資料 A] 原始文稿 ===\n${script}\n================\n` },
+          { text: `\n=== [資料 B] 高精準 SRT 時間軸 ===\n${srt}\n================\n` }
+        ]
       }],
       config: {
         responseMimeType: 'application/json',
       }
     });
 
-    const rawJSON = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
-    // 預防 AI 還是回傳了 Markdown block (如 ```json)
-    const cleanedJSON = rawJSON.replace(/```json/g, '').replace(/```/g, '').trim();
+    const rawJSON = timingResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+    const cleanedJSON = rawJSON.replace(/```json/gi, '').replace(/```/g, '').trim();
     const timings = JSON.parse(cleanedJSON);
 
-    return NextResponse.json({ timings });
+    return NextResponse.json({ srt, timings });
   } catch (err: unknown) {
     if (err instanceof Error && err.message === 'Missing API Key') return unauthorizedResponse();
     console.error('Align Podcast Error:', err);

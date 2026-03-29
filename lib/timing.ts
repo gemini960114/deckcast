@@ -121,26 +121,7 @@ function equalDistribution(slideCount: number, totalDuration: number): SlideTimi
   }));
 }
 
-// Extract per-slide text segments from script (投影片 N：...) or plain text
-export function extractSlideTexts(text: string, slideCount: number): string[] {
-  const slidePattern = /投影片\s*\d+[：:]/g;
-  const matches = [...text.matchAll(slidePattern)];
 
-  if (matches.length > 0) {
-    return matches.map((m, i) => {
-      const start = m.index! + m[0].length;
-      const end = i + 1 < matches.length ? matches[i + 1].index! : text.length;
-      return text.slice(start, end).trim();
-    });
-  }
-
-  // Fallback: split by line count
-  const lines = text.split('\n').filter(l => l.trim());
-  const perSlide = Math.ceil(lines.length / slideCount);
-  return Array.from({ length: slideCount }, (_, i) =>
-    lines.slice(i * perSlide, (i + 1) * perSlide).join('\n')
-  );
-}
 
 // AI Timing Normalizer: Safeguards Gemini's estimations, correcting missing slides and forcing total length to match actual audio runtime.
 export function normalizeTimings(
@@ -170,7 +151,7 @@ export function normalizeTimings(
     for (const t of validTimings) {
       const ratio = t.durationSec / sumDuration;
       const scaledDuration = totalDuration * ratio;
-      
+
       timings.push({
         slideIndex: t.slideIndex,
         startSec: currentSec,
@@ -187,12 +168,12 @@ export function normalizeTimings(
   for (let i = 1; i <= slideCount; i++) {
     const hit = aiTimings.find(t => t.slideIndex === i);
     let st = hit?.vocalStartSec;
-    
+
     // Recovery for missing timestamps
     if (typeof st !== 'number') {
       st = startTimes.length > 0 ? startTimes[startTimes.length - 1] + 5 : 0;
     }
-    
+
     // Confine to bounds
     st = Math.max(0, Math.min(st, totalDuration));
     startTimes.push(st);
@@ -201,7 +182,7 @@ export function normalizeTimings(
   // Guarantee monotonic increase (avoids negative durations)
   for (let i = 1; i < startTimes.length; i++) {
     if (startTimes[i] <= startTimes[i - 1]) {
-      startTimes[i] = Math.min(startTimes[i - 1] + 1, totalDuration); 
+      startTimes[i] = Math.min(startTimes[i - 1] + 1, totalDuration);
     }
   }
 
@@ -209,11 +190,11 @@ export function normalizeTimings(
   const timings: SlideTimings = [];
   for (let i = 0; i < slideCount; i++) {
     const nextStart = i + 1 < slideCount ? startTimes[i + 1] : totalDuration;
-    
+
     // First slide conceptually starts at 0 to endure any instrumental intro
     const actualStart = i === 0 ? 0 : startTimes[i];
     const dur = Math.max(nextStart - actualStart, 1);
-    
+
     timings.push({
       slideIndex: i + 1,
       startSec: actualStart,
@@ -224,4 +205,5 @@ export function normalizeTimings(
 
   return timings;
 }
+
 

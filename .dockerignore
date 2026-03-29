@@ -22,7 +22,8 @@ AGENTS.md
 
 # ── Docs & specs ──
 README.md
-spec.md
+SPEC.md
+TODOLIST.md
 
 # ── Docker files themselves (no need to copy in) ──
 Dockerfile
