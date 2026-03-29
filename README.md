@@ -245,17 +245,23 @@ docker run -p 3000:3000 -d deckcast-app
 ```
 啟動後，於瀏覽器前往 `http://localhost:3000` 即可使用。
 
-### 方式 2：使用 Docker Compose
+### 方式 2：使用 Docker Compose (推薦於私有伺服器部署)
 
-使用 `docker-compose.yml` 一鍵背景建置與啟動服務：
+專案內已附帶設定好的 `docker-compose.yml`（包含 Node 環境載入、啟動腳本、Port 3000 綁定，以及定時自動重新啟動設定）。
+這是最乾淨、最不怕主機套件衝突的啟動方式。
 
 ```bash
-# 建置並在背景啟動
+# 1. 一鍵建置並在背景啟動所有服務（包含自動重啟機制）
 docker compose up -d --build
 
-# 停止服務
+# 2. 檢視運行狀態與 log 日誌
+docker compose logs -f
+
+# 3. 停止與關閉服務
 docker compose down
 ```
+
+啟動後，於瀏覽器前往 `http://localhost:3000` 即可使用。
 
 ### 方式 3：雲端部署 (Google Cloud Run)
 
