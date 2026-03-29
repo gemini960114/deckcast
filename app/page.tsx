@@ -172,7 +172,7 @@ function DownloadChip({ label, onClick, dark }: { label: string; onClick: () => 
   return (
     <button onClick={onClick}
       className={`inline-flex items-center gap-1 text-[11px] font-semibold px-3 py-1.5 rounded-full border transition-all ${dark ? 'text-emerald-400 bg-emerald-900/30 border-emerald-800 hover:bg-emerald-800/60'
-          : 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+        : 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
         }`}>
       <span style={{ fontSize: 12 }}>↓</span>{label}
     </button>
@@ -482,7 +482,7 @@ export default function Home() {
             </button>
             <button onClick={() => { setDrawerOpen(true); loadHistory(); }}
               className={`text-[11px] font-semibold border rounded-full px-4 py-1.5 transition-all ${dark ? 'text-slate-400 border-slate-600 hover:text-emerald-400 hover:border-emerald-700'
-                  : 'text-slate-500 border-slate-200 hover:text-emerald-700 hover:border-emerald-400'
+                : 'text-slate-500 border-slate-200 hover:text-emerald-700 hover:border-emerald-400'
                 }`}>
               歷史紀錄
             </button>
