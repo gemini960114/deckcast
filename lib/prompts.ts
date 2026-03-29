@@ -95,7 +95,14 @@ export function buildPodcastPrompt(vars: {
 
 // ===== Lyrics Prompts =====
 export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number, endTime: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，長度約 ${totalSec} 秒，並依照以下投影片內容順序編寫歌詞。`;
+  `幫我創作 ${styleLabel} 風格歌詞，長度約 ${totalSec} 秒，並依照以下投影片內容順序編寫歌詞。
+
+【重要格式規範】
+你必須要在每個段落的上方，明確標註該段落歌詞是隸屬於哪一張投影片。
+格式請完全遵守：[段落名稱] —— 對應投影片 N
+(例如：[Chorus] —— 對應投影片 2)
+
+請盡情發揮創意，但務必確保每張投影片都有被清楚標記到。`;
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
   // 提取數字部分，解析失敗則給予預設值 90 秒
