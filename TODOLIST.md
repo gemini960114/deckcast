@@ -26,7 +26,7 @@
 - [x] `POST /api/generate-lyrics`: 依據投影片段落生成分秒精準的 AI 歌詞
 - [x] `POST /api/generate-podcast`: 介接 Gemini Multi-speaker TTS，順利將單一文字雙人扮演回傳 `audio/wav`
 - [x] `POST /api/generate-music`: 呼叫 Lyria 3 作曲，實作了「無序 parts 防呆迴圈安全解析」抓取 `audio/mp3`
-- [x] `POST /api/align-podcast` & `/api/align-music`: 實作 2-step AI 高端聽寫機制，完全精準對齊投影片與音軌時間點
+- [x] `POST /api/align-podcast` & `/api/align-music`: 實作 2-step AI 高端聽寫。特別在音樂對齊階段導入「三角定位法」，用原始文稿輔助 AI 推理歌詞對應的頁碼與精確轉場時間。
 
 ## 5. 前端流程 UI 與簡報 (PPTX) 渲染
 - [x] 實作嚴謹的順序解鎖流程流：(1)上傳 PDF (限 3-10頁) -> (2)腳本文稿 -> (3)歌詞 -> (4)Podcast音訊 -> (5)音樂音訊 -> (6)同步簡報
