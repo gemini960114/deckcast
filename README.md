@@ -220,6 +220,10 @@ npm install
 
 # 啟動開發伺服器
 npm run dev
+
+# ⚠️ 注意：若在 Windows 環境下遇到 Turbopack 異常崩潰 (exit code 0xc0000142)
+# 請強制改用 Webpack 模式啟動：
+# npm run dev -- --webpack
 ```
 
 開啟瀏覽器至 `http://localhost:3000`，於 Step 0 填入 Gemini API Key 即可開始使用。
