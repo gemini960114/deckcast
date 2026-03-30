@@ -8,13 +8,13 @@ import { MODEL_TEXT, DEFAULT_LYRICS_DURATION } from '@/lib/constants';
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { slides, styleId, duration = DEFAULT_LYRICS_DURATION } = await req.json();
+    const { script, styleId, duration = DEFAULT_LYRICS_DURATION } = await req.json();
     const styleLabel = MUSIC_STYLES.find((s) => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
     const stylePrompt = buildLyricsPrompt(styleLabel, duration);
 
     const response = await ai.models.generateContent({
       model: MODEL_TEXT,
-      contents: [{ parts: [{ text: `${stylePrompt}\n\n${slides}` }] }],
+      contents: [{ parts: [{ text: `${stylePrompt}\n\n${script}` }] }],
     });
 
     const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
