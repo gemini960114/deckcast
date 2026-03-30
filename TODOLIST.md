@@ -40,3 +40,4 @@
 - [x] 移除舊有 `30-second` 短歌選項，全盤統一改用更智能涵蓋所有時長的 `MODEL_MUSIC_PRO`
 - [x] 確認並修改全站針對簡報「5-10頁」的文字提醒與邊界阻擋邏輯，全部降為「3-10頁」
 - [x] 全專案通過 TypeScript 嚴格型別檢查 (`tsc --noEmit`) 無錯誤
+- [x] **音樂對齊 Prompt 精準化**：重寫 `GENERATE_MUSIC_SRT`，明確分工「lyrics = 唯一正確文字來源，audio = 只用來定位時間」，根除 AI 自行辨識歌詞導致文字失真的問題；強化 `FIND_TRANSITIONS_PROMPT`，補充前 6–8 字定錨關鍵字、前奏/間奏邊界處理、無標記時輸出空陣列等規則；`align-music/route.ts` 加入 Phase 1 獨立 try/catch 與 Phase 2 fallback 防呆機制
