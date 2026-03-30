@@ -105,13 +105,54 @@ export const LYRICS_PROMPT_TIMED_OLD = (styleLabel: string, totalSec: number, en
 請盡情發揮創意，但務必確保每張投影片都有被清楚標記到。`;
 
 
-export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
+export const LYRICS_PROMPT_TIMED_OLD2 = (styleLabel: string, totalSec: number) =>
   `幫我創作一首 ${styleLabel} 風格的歌曲歌詞，長度約 ${totalSec} 秒。
 
 請依照投影片內容順序發展歌詞，讓整體故事自然流動。
 
 請使用常見歌曲段落（Intro、Verse、Chorus、Bridge）。
 每個段落請標註對應時間軸與投影片頁碼，例如：[0:00 - 0:10] [Verse 1] [Slide 2]。
+`;
+
+
+export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
+  `幫我創作一首 ${styleLabel} 風格的歌曲歌詞，總長度約 ${totalSec} 秒。
+
+【輸出格式要求】（請嚴格遵守）：
+請先輸出歌曲基本資訊，格式如下：
+
+歌曲名稱：【自行創作一個有創意的標題】
+風格：${styleLabel}
+總時長：約 ${totalSec} 秒
+節奏：請自行設定 BPM（例如 90 BPM / 120 BPM）
+關鍵元素：列出 3-5 個音樂元素（例如：808 重低音、Hi-hats、合成器等）
+
+---
+接著再輸出完整歌詞內容。
+
+【歌詞要求】：
+1. 使用常見段落：Intro、Verse、Chorus、Bridge、Outro
+2. 每段都必須包含：
+   - 時間軸（例如 [0:00 - 0:10]）
+   - 段落名稱
+   - 投影片頁碼（例如 [Slide 2]）
+3. 所有段落時間加總需接近 ${totalSec} 秒（誤差 ±5 秒內）
+4. 歌詞需依照投影片順序發展，故事自然流動
+5. 可以加入旁白、音效描述、角色對話（增加沉浸感）
+6. 風格要符合 ${styleLabel}
+
+【格式範例】：
+歌曲名稱：【範例標題】
+風格：XXX
+總時長：約 XX 秒
+節奏：100 BPM
+關鍵元素：元素1、元素2、元素3
+
+[0:00 - 0:10] Intro [Slide 1]
+（音效描述）
+歌詞...
+
+請嚴格按照上述格式輸出，不要省略標題區塊，時間軸必須合理分配。
 `;
 
 export function buildLyricsPrompt(styleLabel: string, duration: string): string {
