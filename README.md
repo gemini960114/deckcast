@@ -2,6 +2,8 @@
 
 一個 AI 驅動的內容生成工具，將 PDF 簡報自動轉換為 Podcast 音訊、AI 歌曲與同步簡報。
 
+👉 **線上展示：[DeckCastAI 簡報語音生成器 - 讓簡報開口說話 · AI 簡報語音生成器](https://deckcast.biobank.org.tw/)**
+
 ---
 
 ## 產品簡介
