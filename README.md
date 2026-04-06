@@ -337,19 +337,28 @@ docker compose down
 - 在 Docker build 時帶入 `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID`
 - 在 Cloud Run deploy 時帶入 auth 與 Whisper 所需的 runtime env vars
 
-你可以直接用 substitutions 覆蓋預設值，例如：
+#### 部署步驟
 
 ```bash
-gcloud builds submit \
-  --config cloudbuild.yaml \
-  --substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=ai4all,_SESSION_SECRET=replace-with-a-long-random-secret,_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=your-whisper-key
+# 1. 登入 Google Cloud
+gcloud auth login
+
+# 2. 設定目標專案
+gcloud config set project gen-lang-client-0039151647
+
+# 3. 提交 Cloud Build 部署
+#    ⚠️ 重要：在 PowerShell 中 --substitutions 值必須用雙引號包住，
+#    否則 PowerShell 會把逗號當陣列分隔符，導致環境變數設定錯誤。
+gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions"
 ```
 
-補充說明：
+#### 補充說明
+
 - `GOOGLE_CLIENT_ID`、`INVITATION_CODE`、`SESSION_SECRET` 是 auth 啟用時必需的 server-side 參數
 - `NCHC_WHISPER_*` 會影響 Whisper 對齊能力；未設定時仍可退回非 Whisper 路徑，但精準度可能下降
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
+- **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 
 ---
 
