@@ -14,7 +14,7 @@ export async function generatePptx(
   timings: SlideTimings,
   audioBlob?: Blob
 ): Promise<Blob> {
-  // @ts-ignore: Next.js/TypeScript cannot resolve https imports at build time
+  // @ts-expect-error: Next.js/TypeScript cannot resolve https imports at build time
   const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
 
@@ -72,17 +72,12 @@ export async function generatePptx(
     let xml = await zip.file(slideFiles[i])?.async('string');
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
-    
     const isLastSlide = i === slideFiles.length - 1;
+    const finalDurationMs = isLastSlide ? durationMs + 2000 : durationMs;
     const effectXML = '<p:fade/>'; // 全部都有淡化特效
-    
-    if (isLastSlide) {
-      // 最後一頁不需要設定自動換頁，僅保留進場的特效
-      xml = xml.replace('</p:sld>', `<p:transition spd="med">${effectXML}</p:transition></p:sld>`);
-    } else {
-      // 其他投影片到了指定秒數自動換頁
-      xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition></p:sld>`);
-    }
+
+    // 所有投影片都保留自動換頁時間；最後一頁額外多等 2 秒再結束
+    xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${finalDurationMs}">${effectXML}</p:transition></p:sld>`);
     zip.file(slideFiles[i], xml);
   }
 

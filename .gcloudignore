@@ -32,6 +32,7 @@ Thumbs.db
 desktop.ini
 *.swp
 *.swo
+.codex-dev.log
 
 # ── Docs & specs (非必要) ──
 README.md

@@ -7,6 +7,17 @@ const STORE_NAME = 'records';
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
+function normalizeOwnerEmail(ownerEmail?: string) {
+  const normalized = ownerEmail?.trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function canAccessRecord(record: GenerationRecord, ownerEmail?: string) {
+  const normalizedOwnerEmail = normalizeOwnerEmail(ownerEmail);
+  if (!normalizedOwnerEmail) return true;
+  return normalizeOwnerEmail(record.ownerEmail) === normalizedOwnerEmail;
+}
+
 function getDB() {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
@@ -22,7 +33,10 @@ function getDB() {
 
 export async function saveRecord(record: GenerationRecord) {
   const db = await getDB();
-  await db.put(STORE_NAME, record);
+  await db.put(STORE_NAME, {
+    ...record,
+    ownerEmail: normalizeOwnerEmail(record.ownerEmail),
+  });
 }
 
 export async function getRecord(id: string): Promise<GenerationRecord | undefined> {
@@ -36,15 +50,31 @@ export async function getAllRecords(): Promise<GenerationRecord[]> {
   return all.sort((a, b) => b.createdAt - a.createdAt);
 }
 
-export async function deleteRecord(id: string) {
-  const db = await getDB();
-  await db.delete(STORE_NAME, id);
+export async function getRecordsByOwner(ownerEmail?: string): Promise<GenerationRecord[]> {
+  const all = await getAllRecords();
+  const normalizedOwnerEmail = normalizeOwnerEmail(ownerEmail);
+  if (!normalizedOwnerEmail) return all;
+  return all.filter(record => normalizeOwnerEmail(record.ownerEmail) === normalizedOwnerEmail);
 }
 
-export async function updateRecord(id: string, updates: Partial<GenerationRecord>) {
+export async function deleteRecord(id: string, ownerEmail?: string) {
   const db = await getDB();
   const existing = await db.get(STORE_NAME, id);
-  if (existing) {
-    await db.put(STORE_NAME, { ...existing, ...updates });
-  }
+  if (existing && !canAccessRecord(existing, ownerEmail)) return false;
+  await db.delete(STORE_NAME, id);
+  return true;
+}
+
+export async function updateRecord(id: string, updates: Partial<GenerationRecord>, ownerEmail?: string) {
+  const db = await getDB();
+  const existing = await db.get(STORE_NAME, id);
+  if (!existing) return false;
+  if (!canAccessRecord(existing, ownerEmail)) return false;
+
+  await db.put(STORE_NAME, {
+    ...existing,
+    ...updates,
+    ownerEmail: normalizeOwnerEmail(existing.ownerEmail ?? ownerEmail),
+  });
+  return true;
 }

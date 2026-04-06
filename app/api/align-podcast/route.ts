@@ -1,63 +1,298 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { MODEL_TEXT } from '@/lib/constants';
-import { GENERATE_PODCAST_SRT, FIND_TRANSITIONS_PROMPT } from '@/lib/prompts';
+import { resolveTextModel } from '@/lib/constants';
+import { FIND_PODCAST_TRANSITIONS_PROMPT, GENERATE_PODCAST_SRT, REFINE_PODCAST_SRT_TEXT_PROMPT } from '@/lib/prompts';
+import { isWhisperConfigured, transcribeAudioWithWhisper } from '@/lib/whisper';
+import { parseMusicSrtJson, repairSrtEntries, srtEntriesToText } from '@/lib/srt';
+import { buildPodcastFallbackTimingsByScriptWeight, buildSlideTimingsFromSrtIds, normalizeTimings } from '@/lib/timing';
+import type { AlignPodcastDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
 
 export const maxDuration = 300;
+
+function parseNumericValue(value: unknown): number {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value.trim());
+    return Number.isFinite(parsed) ? parsed : NaN;
+  }
+  return NaN;
+}
+
+function parseCorrectedSrtTexts(raw: string, srtEntries: SrtEntry[]): SrtEntry[] {
+  const cleaned = raw
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return srtEntries;
+
+    const correctedTextById = new Map<number, string>();
+    for (const item of parsed) {
+      const id = parseNumericValue(item?.id);
+      if (!Number.isFinite(id)) continue;
+      const text = typeof item?.text === 'string' ? item.text.trim() : '';
+      if (!text) continue;
+      correctedTextById.set(Math.trunc(id), text);
+    }
+
+    return srtEntries.map(entry => ({
+      ...entry,
+      text: correctedTextById.get(entry.id) ?? entry.text,
+    }));
+  } catch (e) {
+    console.warn('Failed to parse corrected podcast SRT text JSON:', e);
+    return srtEntries;
+  }
+}
+
+function extractSlideCount(script: string): number {
+  const matches = [...script.matchAll(/投影片\s*(\d+)\s*[:：]/gi)];
+  if (matches.length === 0) return 0;
+  return Math.max(...matches.map(match => Number(match[1]) || 0));
+}
+
+function parsePodcastTransitionMatchesJSON(raw: string, slideCount: number, srtEntries: SrtEntry[]): MusicTransitionMatch[] {
+  const cleaned = raw
+    .replace(/```json/gi, '')
+    .replace(/```/g, '')
+    .trim();
+
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (!Array.isArray(parsed)) return [];
+
+    const validIds = new Set(srtEntries.map(entry => entry.id));
+    return parsed
+      .map((item): MusicTransitionMatch | null => {
+        const slideIndex = parseNumericValue(item?.slideIndex);
+        if (!Number.isFinite(slideIndex) || slideIndex < 1 || slideIndex > slideCount) return null;
+        const rawId = parseNumericValue(item?.startSrtId);
+        const startSrtId = Number.isFinite(rawId) && validIds.has(Math.trunc(rawId)) ? Math.trunc(rawId) : null;
+        const confidence = parseNumericValue(item?.confidence);
+        return {
+          slideIndex: Math.trunc(slideIndex),
+          startSrtId,
+          confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
+          matchReason: typeof item?.matchReason === 'string' ? item.matchReason.trim() : undefined,
+        };
+      })
+      .filter((item): item is MusicTransitionMatch => item !== null)
+      .sort((a, b) => a.slideIndex - b.slideIndex);
+  } catch (e) {
+    console.warn('Failed to parse podcast transition matches JSON:', e);
+    return [];
+  }
+}
+
+function buildFallbackPodcastSrt(script: string): string {
+  const lines = script
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line)
+    .filter(line => !/^風格[:：]/.test(line))
+    .filter(line => !/^投影片\s*\d+[:：]/.test(line))
+    .filter(line => !/^(speaker\s*\d+|mary老師|阿哲|男聲|女聲)\s*[:：]/i.test(line));
+
+  return lines
+    .map((line, index) => `${index + 1}\n00:00:${String(index * 3).padStart(2, '0')},000 --> 00:00:${String(index * 3 + 2).padStart(2, '0')},500\n${line}`)
+    .join('\n\n')
+    .trim();
+}
+
+async function generatePodcastSrtWithGemini(params: {
+  ai: ReturnType<typeof getAI>;
+  audioBase64: string;
+  audioMimeType: string;
+  script: string;
+  textModel: string;
+}): Promise<SrtEntry[]> {
+  const response = await params.ai.models.generateContent({
+    model: params.textModel,
+    contents: [{
+      parts: [
+        { text: GENERATE_PODCAST_SRT },
+        {
+          inlineData: {
+            data: params.audioBase64,
+            mimeType: params.audioMimeType,
+          },
+        },
+        { text: `\n\n=== [資料 B] Podcast 參考逐字稿 ===\n${params.script}\n========================\n` },
+      ],
+    }],
+    config: {
+      responseMimeType: 'application/json',
+    },
+  });
+
+  const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+  return repairSrtEntries(parseMusicSrtJson(raw));
+}
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
     // Vercel / Cloud Run 預設 NextRequest 對於 body size 在 standalone runtime 相對寬鬆，
     // 但為避免超過預設 JSON parse 上限，通常建議從前端直傳 base64 字串配合前端限流。
-    const { script, audioBase64 } = await req.json();
+    const { script, audioBase64, audioMimeType, textModel } = await req.json();
 
     if (!script || !audioBase64) {
       return NextResponse.json({ error: 'Missing script or audio data' }, { status: 400 });
     }
 
-    // ----- Phase 1: AI generates sentence-by-sentence SRT -----
-    const srtResponse = await ai.models.generateContent({
-      model: MODEL_TEXT,
-      contents: [{
-        parts: [
-          { text: GENERATE_PODCAST_SRT },
-          { text: `\n\n=== 逐字稿 ===\n${script}\n================\n` },
-          {
-            inlineData: {
-              mimeType: 'audio/wav',
-              data: audioBase64
-            }
+    const slideCount = extractSlideCount(script);
+    const modelName = resolveTextModel(textModel);
+    const safeAudioMimeType = typeof audioMimeType === 'string' ? audioMimeType : 'audio/mpeg';
+    const diagnostics: AlignPodcastDiagnostics = {
+      phase1Success: false,
+      asrMode: isWhisperConfigured() ? 'whisper+gemini' : 'gemini-only',
+      srtSource: 'none',
+      timingSource: 'equal-fallback',
+      issues: [],
+    };
+
+    // ----- Phase 1: Whisper generates sentence-by-sentence SRT -----
+    let srt = '';
+    let srtEntries: SrtEntry[] = [];
+    let totalDuration = 0;
+    if (isWhisperConfigured()) {
+      try {
+        const transcription = await transcribeAudioWithWhisper({
+          audioBase64,
+          mimeType: safeAudioMimeType,
+          language: 'zh',
+        });
+
+        srtEntries = transcription.srtEntries;
+        totalDuration = typeof transcription.duration === 'number' && transcription.duration > 0
+          ? transcription.duration
+          : (srtEntries[srtEntries.length - 1]?.end ?? 0);
+
+        if (srtEntries.length) {
+          diagnostics.phase1Success = true;
+          diagnostics.srtSource = 'whisper';
+          try {
+            const textRefineResponse = await ai.models.generateContent({
+              model: modelName,
+              contents: [{
+                parts: [
+                  { text: REFINE_PODCAST_SRT_TEXT_PROMPT },
+                  {
+                    inlineData: {
+                      data: audioBase64,
+                      mimeType: safeAudioMimeType,
+                    },
+                  },
+                  { text: `\n\n=== [資料 B] Whisper 逐段轉錄 ===\n${JSON.stringify(srtEntries, null, 2)}\n========================\n` },
+                  { text: `\n=== [資料 C] Podcast 參考逐字稿 ===\n${script}\n========================\n` },
+                ],
+              }],
+              config: {
+                responseMimeType: 'application/json',
+              },
+            });
+
+            const rawCorrected = textRefineResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+            srtEntries = parseCorrectedSrtTexts(rawCorrected, srtEntries);
+            diagnostics.srtSource = 'hybrid-whisper-gemini';
+          } catch (textRefineErr) {
+            diagnostics.issues.push(`Whisper text refinement failed: ${String(textRefineErr)}`);
+            console.warn('Podcast text refinement failed, keeping raw Whisper text:', textRefineErr);
           }
-        ]
-      }]
-    });
+        } else {
+          diagnostics.issues.push('Whisper returned empty segments.');
+        }
 
-    const rawSrt = srtResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    const srt = rawSrt.replace(/```srt/gi, '').replace(/```/g, '').trim();
-
-    // ----- Phase 2: AI finds slide transitions from Text + SRT -----
-    const timingResponse = await ai.models.generateContent({
-      model: MODEL_TEXT,
-      contents: [{
-        parts: [
-          { text: FIND_TRANSITIONS_PROMPT },
-          { text: `\n\n=== [資料 A] 原始文稿 ===\n${script}\n================\n` },
-          { text: `\n=== [資料 B] 高精準 SRT 時間軸 ===\n${srt}\n================\n` }
-        ]
-      }],
-      config: {
-        responseMimeType: 'application/json',
+        srt = srtEntriesToText(srtEntries);
+      } catch (phase1Err) {
+        diagnostics.issues.push(`Whisper phase failed: ${String(phase1Err)}`);
+        console.warn('Whisper podcast transcription failed, will try Gemini-only mode:', phase1Err);
       }
-    });
+    }
 
-    const rawJSON = timingResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
-    const cleanedJSON = rawJSON.replace(/```json/gi, '').replace(/```/g, '').trim();
-    const timings = JSON.parse(cleanedJSON);
+    if (!srtEntries.length) {
+      try {
+        srtEntries = await generatePodcastSrtWithGemini({
+          ai,
+          audioBase64,
+          audioMimeType: safeAudioMimeType,
+          script,
+          textModel: modelName,
+        });
+        totalDuration = srtEntries[srtEntries.length - 1]?.end ?? totalDuration;
+        srt = srtEntriesToText(srtEntries);
+        if (srtEntries.length) {
+          diagnostics.phase1Success = true;
+          diagnostics.asrMode = 'gemini-only';
+          diagnostics.srtSource = 'gemini-only';
+        }
+      } catch (geminiPhaseErr) {
+        diagnostics.issues.push(`Gemini-only phase failed: ${String(geminiPhaseErr)}`);
+        console.warn('Gemini-only podcast transcription failed, using fallback:', geminiPhaseErr);
+      }
+    }
 
-    return NextResponse.json({ srt, timings });
+    if (!srt) {
+      srt = buildFallbackPodcastSrt(script);
+      diagnostics.srtSource = srt ? 'script-fallback' : 'none';
+      totalDuration = totalDuration || (srtEntries[srtEntries.length - 1]?.end ?? 0);
+      if (!srt) {
+        diagnostics.issues.push('Script fallback SRT is empty.');
+      }
+    }
+
+    // ----- Phase 2: AI finds slide transitions from Text + SRT entries -----
+    let matches: MusicTransitionMatch[] = [];
+    if (slideCount > 0 && srtEntries.length) {
+      try {
+        const timingResponse = await ai.models.generateContent({
+          model: modelName,
+          contents: [{
+            parts: [
+              { text: FIND_PODCAST_TRANSITIONS_PROMPT },
+              { text: `\n\n=== [資料 A] 原始文稿 ===\n${script}\n================\n` },
+              { text: `\n=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n================\n` }
+            ]
+          }],
+          config: {
+            responseMimeType: 'application/json',
+          }
+        });
+
+        const rawJSON = timingResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
+        matches = parsePodcastTransitionMatchesJSON(rawJSON, slideCount, srtEntries);
+      } catch (phase2Err) {
+        diagnostics.issues.push(`Phase 2 failed: ${String(phase2Err)}`);
+        console.warn('Podcast Phase 2 transition matching failed:', phase2Err);
+      }
+    }
+
+    let timings = slideCount > 0 && totalDuration > 0
+      ? buildSlideTimingsFromSrtIds(matches, srtEntries, slideCount, totalDuration)
+      : [];
+
+    if (matches.length > 0 && timings.length > 0 && totalDuration > 0) {
+      diagnostics.timingSource = 'srt-id';
+      timings = normalizeTimings(timings, slideCount, totalDuration);
+    } else if (slideCount > 0 && totalDuration > 0) {
+      diagnostics.timingSource = 'script-char-fallback';
+      diagnostics.issues.push('Phase 2 returned insufficient matches, using script-char fallback.');
+      timings = buildPodcastFallbackTimingsByScriptWeight(script, slideCount, totalDuration);
+    }
+
+    if (!timings.length && slideCount > 0 && totalDuration > 0) {
+      diagnostics.timingSource = 'equal-fallback';
+      diagnostics.issues.push('All timing strategies failed, using equal fallback.');
+      timings = normalizeTimings([], slideCount, totalDuration);
+    }
+
+    return NextResponse.json({ srt, timings, diagnostics });
   } catch (err: unknown) {
-    if (err instanceof Error && err.message === 'Missing API Key') return unauthorizedResponse();
+    if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
+      return unauthorizedResponse(err);
+    }
     console.error('Align Podcast Error:', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

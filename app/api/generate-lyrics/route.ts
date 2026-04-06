@@ -3,17 +3,18 @@ import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { buildLyricsPrompt } from '@/lib/prompts';
 import { MUSIC_STYLES } from '@/lib/types';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { MODEL_TEXT, DEFAULT_LYRICS_DURATION } from '@/lib/constants';
+import { DEFAULT_LYRICS_DURATION, resolveTextModel } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { script, styleId, duration = DEFAULT_LYRICS_DURATION } = await req.json();
+    const { script, styleId, duration = DEFAULT_LYRICS_DURATION, textModel } = await req.json();
+    const modelName = resolveTextModel(textModel);
     const styleLabel = MUSIC_STYLES.find((s) => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
     const stylePrompt = buildLyricsPrompt(styleLabel, duration);
 
     const response = await ai.models.generateContent({
-      model: MODEL_TEXT,
+      model: modelName,
       contents: [{ parts: [{ text: `${stylePrompt}\n\n${script}` }] }],
     });
 
@@ -21,8 +22,8 @@ export async function POST(req: NextRequest) {
     const lyrics = stripMarkdown(raw);
     return NextResponse.json({ lyrics });
   } catch (err: unknown) {
-    if (err instanceof Error && err.message === 'Missing API Key') {
-      return unauthorizedResponse();
+    if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
+      return unauthorizedResponse(err);
     }
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }

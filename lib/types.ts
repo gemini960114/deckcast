@@ -7,10 +7,44 @@ export interface SlideTiming {
 
 export type SlideTimings = SlideTiming[];
 
+export interface SrtEntry {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface MusicTransitionMatch {
+  slideIndex: number;
+  startSrtId: number | null;
+  confidence?: number;
+  matchReason?: string;
+}
+
+export interface AlignMusicDiagnostics {
+  phase1Success: boolean;
+  asrMode: 'whisper+gemini' | 'gemini-only';
+  srtSource: 'hybrid-whisper-gemini' | 'whisper' | 'gemini-only' | 'lyrics-fallback' | 'none';
+  timingSource: 'srt-id' | 'lyrics-weight-fallback' | 'equal-fallback';
+  issues: string[];
+}
+
+export interface AlignPodcastDiagnostics {
+  phase1Success: boolean;
+  asrMode: 'whisper+gemini' | 'gemini-only';
+  srtSource: 'hybrid-whisper-gemini' | 'whisper' | 'gemini-only' | 'script-fallback' | 'none';
+  timingSource: 'srt-id' | 'script-char-fallback' | 'equal-fallback';
+  issues: string[];
+}
+
 export interface GenerationRecord {
   id: string;
   pdfName: string;
   createdAt: number;
+  ownerEmail?: string;
+  textModel?: string;
+  ttsModel?: string;
+  musicModel?: string;
   // Settings snapshot
   speaker1?: string;
   speaker2?: string;
@@ -27,11 +61,17 @@ export interface GenerationRecord {
   lyrics?: string;
   pdfBlob?: Blob;
   podcastBlob?: Blob;
+  podcastSource?: 'api' | 'upload';
   musicBlob?: Blob;
+  musicSource?: 'api' | 'upload';
   podcastPptxBlob?: Blob;
   musicPptxBlob?: Blob;
   podcastSrt?: string;
   musicSrt?: string;
+  podcastDiagnostics?: AlignPodcastDiagnostics;
+  musicDiagnostics?: AlignMusicDiagnostics;
+  podcastTimings?: SlideTiming[];
+  musicTimings?: SlideTiming[];
 }
 
 export interface StepState {

@@ -7,9 +7,9 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { lyrics, duration } = await req.json();
+    const { lyrics, duration, musicModel } = await req.json();
 
-    const modelName = getMusicModel(duration ?? '90-second');
+    const modelName = getMusicModel(duration ?? '90-second', musicModel);
 
     const response = await ai.models.generateContent({
       model: modelName,
@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
         audioMimeType = part.inlineData.mimeType ?? 'audio/mpeg';
       }
     }
+    void metadataText;
 
     if (!audioBase64) {
       const feedback = (response as unknown as Record<string, unknown>).promptFeedback as Record<string, unknown> | undefined;
@@ -51,8 +52,8 @@ export async function POST(req: NextRequest) {
       headers: { 'Content-Type': audioMimeType },
     });
   } catch (err: unknown) {
-    if (err instanceof Error && err.message === 'Missing API Key') {
-      return unauthorizedResponse();
+    if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
+      return unauthorizedResponse(err);
     }
     console.error('[generate-music] error:', err);
     return NextResponse.json({ error: String(err) }, { status: 500 });

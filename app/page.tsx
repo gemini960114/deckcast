@@ -1,17 +1,23 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { setUnauthorizedHandler, apiFetch } from '@/lib/apiFetch';
+import LoginPage from '@/components/LoginPage';
 import { generatePptx } from '@/lib/generatePptx';
-import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration } from '@/lib/timing';
-import { saveRecord, updateRecord, getAllRecords, deleteRecord } from '@/lib/db';
-import type { GenerationRecord, StepState } from '@/lib/types';
+import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings } from '@/lib/timing';
+import { adjustSrtTimes } from '@/lib/srt';
+import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
+import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, GenerationRecord, StepState, SlideTimings } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
-  SESSION_KEY,
+  AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
   DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE,
   DEFAULT_VOICE1, DEFAULT_VOICE2, DEFAULT_STYLE_ID, DEFAULT_LYRICS_DURATION,
+  DEFAULT_TEXT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_MUSIC_MODEL,
+  TEXT_MODEL_OPTIONS, TTS_MODEL_OPTIONS, MUSIC_MODEL_OPTIONS,
   LYRICS_DURATIONS, voiceSampleUrl,
+  PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
 } from '@/lib/constants';
 
 // ── helpers ──
@@ -29,6 +35,38 @@ async function blobToBase64(blob: Blob): Promise<string> {
     reader.onload = () => resolve((reader.result as string).split(',')[1]);
     reader.onerror = reject; reader.readAsDataURL(blob);
   });
+}
+
+function fileHasExtension(file: File, extensions: string[]) {
+  const fileName = file.name.toLowerCase();
+  return extensions.some(ext => fileName.endsWith(ext));
+}
+
+function getAudioExtension(mimeType: string | undefined, fallback: string) {
+  const normalized = (mimeType ?? '').toLowerCase();
+
+  if (normalized === 'audio/mpeg' || normalized === 'audio/mp3') return 'mp3';
+  if (normalized === 'audio/wav' || normalized === 'audio/x-wav' || normalized === 'audio/wave') return 'wav';
+  if (normalized === 'audio/mp4' || normalized === 'audio/x-m4a' || normalized === 'audio/m4a') return 'm4a';
+  if (normalized === 'audio/aac') return 'aac';
+
+  return fallback;
+}
+
+function getAudioMimeType(file: File, fallback: string) {
+  const normalized = file.type.toLowerCase();
+  if (normalized) return normalized;
+
+  if (fileHasExtension(file, ['.mp3'])) return 'audio/mpeg';
+  if (fileHasExtension(file, ['.wav'])) return 'audio/wav';
+  if (fileHasExtension(file, ['.m4a'])) return 'audio/mp4';
+  if (fileHasExtension(file, ['.aac'])) return 'audio/aac';
+
+  return fallback;
+}
+
+function getPodcastDownloadName(blob: Blob) {
+  return `podcast.${getAudioExtension(blob.type, 'mp3')}`;
 }
 
 // ── theme tokens ──
@@ -179,9 +217,33 @@ function DownloadChip({ label, onClick, dark }: { label: string; onClick: () => 
   );
 }
 
+// ── OffsetSelect ──
+function OffsetSelect({ offset, onChange, dark }: { offset: number; onChange: (v: number) => void; dark: boolean }) {
+  const options = [-1.0, -0.9, -0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0];
+  return (
+    <select
+      value={offset}
+      onChange={e => onChange(Number(e.target.value))}
+      className={`ml-2 outline-none text-[10px] font-mono px-1 py-0.5 rounded border transition-all hover:opacity-80 cursor-pointer ${dark ? 'bg-slate-800 text-slate-300 border-slate-600' : 'bg-white text-slate-600 border-slate-300'}`}
+      title="調整時間軸偏移量 (秒)"
+    >
+      {options.map(o => (
+        <option key={o} value={o}>{o === 0 ? '不平移' : (o > 0 ? `+${o}s` : `${o}s`)}</option>
+      ))}
+    </select>
+  );
+}
+
 // ═══════════════════════════════════════════
 export default function Home() {
+  type InputMode = 'api' | 'upload';
+  type MediaSource = 'api' | 'upload';
+
+  const authEnabled = isAuthEnabledClient();
   const [dark, setDark] = useState(true);
+  const [authReady, setAuthReady] = useState(!authEnabled);
+  const [authToken, setAuthToken] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
 
   const [apiKey, setApiKey] = useState('');
   const [apiKeyInput, setApiKeyInput] = useState('');
@@ -191,6 +253,9 @@ export default function Home() {
   const [tone, setTone] = useState(DEFAULT_TONE);
   const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
+  const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
+  const [ttsModel, setTtsModel] = useState<string>(DEFAULT_TTS_MODEL);
+  const [musicModel, setMusicModel] = useState<string>(DEFAULT_MUSIC_MODEL);
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
   const [lyricsDuration, setLyricsDuration] = useState(DEFAULT_LYRICS_DURATION);
   const [pdfFile, setPdfFile] = useState<File | null>(null);
@@ -199,10 +264,20 @@ export default function Home() {
   const [lyrics, setLyrics] = useState('');
   const [podcastBlob, setPodcastBlob] = useState<Blob | null>(null);
   const [musicBlob, setMusicBlob] = useState<Blob | null>(null);
+  const [podcastInputMode, setPodcastInputMode] = useState<InputMode>('api');
+  const [podcastSource, setPodcastSource] = useState<MediaSource>('api');
+  const [musicInputMode, setMusicInputMode] = useState<InputMode>('api');
+  const [musicSource, setMusicSource] = useState<MediaSource>('api');
   const [podcastPptxBlob, setPodcastPptxBlob] = useState<Blob | null>(null);
   const [musicPptxBlob, setMusicPptxBlob] = useState<Blob | null>(null);
   const [podcastSrt, setPodcastSrt] = useState<string>('');
   const [musicSrt, setMusicSrt] = useState<string>('');
+  const [podcastDiagnostics, setPodcastDiagnostics] = useState<AlignPodcastDiagnostics | null>(null);
+  const [musicDiagnostics, setMusicDiagnostics] = useState<AlignMusicDiagnostics | null>(null);
+  const [podcastSrtOffset, setPodcastSrtOffset] = useState<number>(0);
+  const [musicSrtOffset, setMusicSrtOffset] = useState<number>(0);
+  const [podcastTimings, setPodcastTimings] = useState<SlideTimings | null>(null);
+  const [musicTimings, setMusicTimings] = useState<SlideTimings | null>(null);
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
@@ -223,17 +298,69 @@ export default function Home() {
   const step5Ref = useRef<HTMLDivElement>(null);
   const step6Ref = useRef<HTMLDivElement>(null);
   const step7Ref = useRef<HTMLDivElement>(null);
+  const podcastUploadInputRef = useRef<HTMLInputElement>(null);
+  const musicUploadInputRef = useRef<HTMLInputElement>(null);
 
   const t = useTheme(dark);
+  const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
 
   useEffect(() => {
     const saved = sessionStorage.getItem(SESSION_KEY);
     if (saved) { setApiKey(saved); setApiKeyInput(saved); }
-    setUnauthorizedHandler(() => { setApiKey(''); setApiKeyInput(''); setToast('API Key 無效，請重新輸入'); });
-    loadHistory();
-  }, []);
 
-  async function loadHistory() { setHistory(await getAllRecords()); }
+    if (authEnabled) {
+      const session = readStoredAuthSession();
+      if (session) {
+        setAuthToken(session.token);
+        setAuthEmail(session.email);
+      }
+    }
+
+    setUnauthorizedHandler((kind) => {
+      if (kind === 'auth') {
+        clearAuthSession();
+        setAuthToken('');
+        setAuthEmail('');
+        setToast('登入已失效，請重新驗證');
+        return;
+      }
+
+      setApiKey('');
+      setApiKeyInput('');
+      setToast('API Key 無效，請重新輸入');
+    });
+
+    setAuthReady(true);
+  }, [authEnabled]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    void (async () => {
+      if (authEnabled) {
+        if (!authEmail) {
+          setHistory([]);
+          return;
+        }
+        setHistory(await getRecordsByOwner(authEmail));
+        return;
+      }
+
+      setHistory(await getAllRecords());
+    })();
+  }, [authEnabled, authEmail, authReady]);
+
+  async function loadHistory() {
+    if (authEnabled) {
+      if (!authEmail) {
+        setHistory([]);
+        return;
+      }
+      setHistory(await getRecordsByOwner(authEmail));
+      return;
+    }
+
+    setHistory(await getAllRecords());
+  }
 
   function saveApiKey() {
     const key = apiKeyInput.trim(); if (!key) return;
@@ -241,6 +368,63 @@ export default function Home() {
   }
   function clearApiKey() {
     sessionStorage.removeItem(SESSION_KEY); setApiKey(''); setApiKeyInput(''); setToast('API Key 已清除');
+  }
+
+  function handleLoginSuccess(session: AuthSession) {
+    storeAuthSession(session.token, session.email);
+    setAuthToken(session.token);
+    setAuthEmail(session.email);
+    setToast('登入成功，已進入 DeckCast 工作台');
+  }
+
+  function handleLogout() {
+    clearAuthSession();
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_EMAIL_KEY);
+    setAuthToken('');
+    setAuthEmail('');
+    setHistory([]);
+    setDrawerOpen(false);
+    handleNewProject();
+    setToast('已登出，請重新完成驗證');
+  }
+
+  function resetPodcastDerivedState() {
+    setPodcastPptxBlob(null);
+    setPodcastSrt('');
+    setPodcastDiagnostics(null);
+    setStep4State({ status: 'idle' });
+    setPodcastTimings(null);
+    setPodcastSrtOffset(0);
+  }
+
+  function resetMusicDerivedState() {
+    setMusicPptxBlob(null);
+    setMusicSrt('');
+    setMusicDiagnostics(null);
+    setStep7State({ status: 'idle' });
+    if (recordId) {
+      void updateRecord(recordId, { musicPptxBlob: undefined, musicSrt: undefined, musicDiagnostics: undefined }, normalizedOwnerEmail);
+    }
+  }
+
+  function isMp3File(file: File) {
+    const fileName = file.name.toLowerCase();
+    return file.type === 'audio/mpeg' || file.type === 'audio/mp3' || fileName.endsWith('.mp3');
+  }
+
+  function isPodcastAudioFile(file: File) {
+    if (isMp3File(file)) return true;
+
+    const mimeType = file.type.toLowerCase();
+    return mimeType === 'audio/wav' ||
+      mimeType === 'audio/x-wav' ||
+      mimeType === 'audio/wave' ||
+      mimeType === 'audio/mp4' ||
+      mimeType === 'audio/x-m4a' ||
+      mimeType === 'audio/m4a' ||
+      mimeType === 'audio/aac' ||
+      fileHasExtension(file, ['.wav', '.m4a', '.aac']);
   }
 
   async function handlePdfUpload(file: File) {
@@ -255,26 +439,45 @@ export default function Home() {
 
     setPdfFile(file); setStep1State({ status: 'loading' });
     try {
-      // @ts-ignore: bypass remote https import typing
+      // @ts-expect-error: bypass remote https import typing
       const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
       pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-      if (pdfDoc.numPages < 3 || pdfDoc.numPages > 10) {
-        const msg = '請上傳 3-10 頁的範圍簡報檔案';
+      if (pdfDoc.numPages < 3 || pdfDoc.numPages > 15) {
+        const msg = '請上傳 3-15 頁的範圍簡報檔案';
         setStep1State({ status: 'error', error: msg });
         setToast(msg);
         return;
       }
 
       const pdfBase64 = await blobToBase64(file);
-      const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64 });
+      const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64, textModel });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setSlides(data.slides); setStep1State({ status: 'done' });
       const id = `${Date.now()}`; setRecordId(id);
-      await saveRecord({ id, pdfName: file.name, createdAt: Date.now(), speaker1, speaker2, dialogueStyle, tone, voice1, voice2, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', slides: data.slides, pdfBlob: file });
+      await saveRecord({
+        id,
+        pdfName: file.name,
+        createdAt: Date.now(),
+        ownerEmail: normalizedOwnerEmail,
+        speaker1,
+        speaker2,
+        dialogueStyle,
+        tone,
+        voice1,
+        voice2,
+        textModel,
+        ttsModel,
+        musicModel,
+        styleId,
+        lyricsDuration,
+        musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '',
+        slides: data.slides,
+        pdfBlob: file,
+      });
       loadHistory();
       setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep1State({ status: 'error', error: String(e) }); setToast('PDF 解析失敗：' + String(e)); }
@@ -283,10 +486,17 @@ export default function Home() {
   async function handleGenerateScript() {
     if (!slides) return; setStep2State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-script', { slides, speaker1: speaker1 || DEFAULT_SPEAKER1, speaker2: speaker2 || DEFAULT_SPEAKER2, dialogueStyle: dialogueStyle || DEFAULT_DIALOGUE_STYLE, tone: tone || DEFAULT_TONE });
+      const res = await apiFetch('/api/generate-script', {
+        slides,
+        speaker1: speaker1 || DEFAULT_SPEAKER1,
+        speaker2: speaker2 || DEFAULT_SPEAKER2,
+        dialogueStyle: dialogueStyle || DEFAULT_DIALOGUE_STYLE,
+        tone: tone || DEFAULT_TONE,
+        textModel,
+      });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setScript(data.script); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, speaker1, speaker2, dialogueStyle, tone });
+      if (recordId) await updateRecord(recordId, { script: data.script, speaker1, speaker2, dialogueStyle, tone, textModel }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -294,12 +504,81 @@ export default function Home() {
   async function handleGeneratePodcast() {
     if (!script) return; setStep3State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2 });
+      setPodcastInputMode('api');
+      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel });
       if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob(); setPodcastBlob(blob); setStep3State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastBlob: blob, voice1, voice2 });
+      const blob = await res.blob();
+      resetPodcastDerivedState();
+      setPodcastBlob(blob);
+      setPodcastSource('api');
+      setStep3State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'api', voice1, voice2, ttsModel }, normalizedOwnerEmail);
       setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep3State({ status: 'error', error: String(e) }); setToast('Podcast 音訊生成失敗：' + String(e)); }
+  }
+
+  async function handlePodcastUpload(file: File) {
+    if (!isPodcastAudioFile(file)) {
+      const msg = '請上傳 mp3、wav、m4a 或 aac 音訊檔案';
+      setStep3State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
+    if (file.size > PODCAST_MAX_FILE_SIZE) {
+      const msg = '檔案太大，請保持在 50MB 以內';
+      setStep3State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
+    setStep3State({ status: 'loading' });
+    try {
+      const blob = new Blob([await file.arrayBuffer()], { type: getAudioMimeType(file, 'audio/mpeg') });
+      setPodcastInputMode('upload');
+      resetPodcastDerivedState();
+      setPodcastBlob(blob);
+      setPodcastSource('upload');
+      setStep3State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'upload' }, normalizedOwnerEmail);
+      setToast(`已上傳音訊：${file.name}`);
+      setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    } catch (e) {
+      setStep3State({ status: 'error', error: String(e) });
+      setToast('音訊上傳失敗：' + String(e));
+    }
+  }
+
+  async function handleRepackPodcastPptx() {
+    if (!podcastBlob || !pdfFile || !podcastTimings) return;
+    setStep4State({ status: 'loading' });
+    try {
+      const newTimings = shiftTimings(podcastTimings, podcastSrtOffset);
+      const pptx = await generatePptx(pdfFile, newTimings, podcastBlob);
+      setPodcastPptxBlob(pptx);
+      setStep4State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx }, normalizedOwnerEmail);
+      setToast(`已套用平移 (${podcastSrtOffset > 0 ? '+' : ''}${podcastSrtOffset}s) 並重新封裝 Podcast 簡報！`);
+    } catch (e) {
+      setStep4State({ status: 'error', error: String(e) });
+      setToast('重封裝失敗：' + String(e));
+    }
+  }
+
+  async function handleRepackMusicPptx() {
+    if (!musicBlob || !pdfFile || !musicTimings) return;
+    setStep7State({ status: 'loading' });
+    try {
+      const newTimings = shiftTimings(musicTimings, musicSrtOffset);
+      const pptx = await generatePptx(pdfFile, newTimings, musicBlob);
+      setMusicPptxBlob(pptx);
+      setStep7State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx }, normalizedOwnerEmail);
+      setToast(`已套用平移 (${musicSrtOffset > 0 ? '+' : ''}${musicSrtOffset}s) 並重新封裝歌曲簡報！`);
+    } catch (e) {
+      setStep7State({ status: 'error', error: String(e) });
+      setToast('重封裝失敗：' + String(e));
+    }
   }
 
   async function handleGeneratePodcastPptx() {
@@ -310,11 +589,18 @@ export default function Home() {
       const audioBase64 = await blobToBase64(podcastBlob);
       const duration = await getAudioDuration(podcastBlob);
 
-      const res = await apiFetch('/api/align-podcast', { script, audioBase64 });
+      const res = await apiFetch('/api/align-podcast', {
+        script,
+        audioBase64,
+        audioMimeType: podcastBlob.type || 'audio/mpeg',
+        textModel,
+      });
       let timings;
       let srt = '';
+      let diagnostics: AlignPodcastDiagnostics | null = null;
       if (res.ok) {
         const data = await res.json();
+        diagnostics = data.diagnostics ?? null;
         timings = normalizeTimings(data.timings, slideCount, duration);
         srt = data.srt ?? '';
       } else {
@@ -324,7 +610,9 @@ export default function Home() {
 
       const pptx = await generatePptx(pdfFile, timings, podcastBlob);
       setPodcastPptxBlob(pptx); setPodcastSrt(srt); setStep4State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx, podcastSrt: srt });
+      setPodcastDiagnostics(diagnostics);
+      setPodcastTimings(timings);
+      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx, podcastSrt: srt, podcastDiagnostics: diagnostics ?? undefined, podcastTimings: timings, textModel }, normalizedOwnerEmail);
       setToast('Podcast 簡報已生成！'); loadHistory();
       setTimeout(() => step5Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
@@ -335,10 +623,10 @@ export default function Home() {
   async function handleGenerateLyrics() {
     if (!script) return; setStep5State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration });
+      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration, textModel });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '' });
+      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel }, normalizedOwnerEmail);
       setTimeout(() => step6Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep5State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
   }
@@ -346,15 +634,52 @@ export default function Home() {
   async function handleGenerateMusic() {
     if (!lyrics) return; setStep6State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-music', { lyrics, styleId, duration: lyricsDuration });
+      setMusicInputMode('api');
+      const res = await apiFetch('/api/generate-music', { lyrics, styleId, duration: lyricsDuration, musicModel });
       if (!res.ok) throw new Error(await res.text());
-      const blob = await res.blob(); setMusicBlob(blob); setStep6State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicBlob: blob });
+      const blob = await res.blob();
+      resetMusicDerivedState();
+      setMusicBlob(blob);
+      setMusicSource('api');
+      setStep6State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'api', musicModel }, normalizedOwnerEmail);
       setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
       const msg = String(e); const isBlocked = msg.includes('PROHIBITED_CONTENT');
       setStep6State({ status: 'error', error: isBlocked ? 'PROHIBITED_CONTENT：歌詞觸發內容審核，請重新生成歌詞後再試' : msg });
       setToast(isBlocked ? '歌詞觸發內容審核，請重新生成歌詞' : '音樂生成失敗：' + msg);
+    }
+  }
+
+  async function handleMusicUpload(file: File) {
+    if (!isMp3File(file)) {
+      const msg = '請上傳 mp3 音樂檔案';
+      setStep6State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
+    if (file.size > MUSIC_MAX_FILE_SIZE) {
+      const msg = '檔案太大，請保持在 20MB 以內';
+      setStep6State({ status: 'error', error: msg });
+      setToast(msg);
+      return;
+    }
+
+    setStep6State({ status: 'loading' });
+    try {
+      const blob = new Blob([await file.arrayBuffer()], { type: 'audio/mpeg' });
+      setMusicInputMode('upload');
+      resetMusicDerivedState();
+      setMusicBlob(blob);
+      setMusicSource('upload');
+      setStep6State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'upload' }, normalizedOwnerEmail);
+      setToast(`已上傳音樂：${file.name}`);
+      setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
+    } catch (e) {
+      setStep6State({ status: 'error', error: String(e) });
+      setToast('音樂上傳失敗：' + String(e));
     }
   }
 
@@ -366,12 +691,23 @@ export default function Home() {
       const audioBase64 = await blobToBase64(musicBlob);
       const duration = await getAudioDuration(musicBlob);
 
-      const res = await apiFetch('/api/align-music', { lyrics, audioBase64 });
+      const res = await apiFetch('/api/align-music', {
+        lyrics,
+        audioBase64,
+        audioMimeType: musicBlob.type || 'audio/mpeg',
+        duration,
+        slideCount,
+        textModel,
+      });
       let timings;
       let srt = '';
+      let diagnostics: AlignMusicDiagnostics | null = null;
       if (res.ok) {
         const data = await res.json();
-        timings = normalizeTimings(data.timings, slideCount, duration);
+        diagnostics = data.diagnostics ?? null;
+        timings = Array.isArray(data.timings) && data.timings.length > 0
+          ? normalizeTimings(data.timings, slideCount, duration)
+          : await calcMusicTimings(slideCount, musicBlob, lyrics);
         srt = data.srt ?? '';
       } else {
         console.warn('API align-music failed, falling back to heuristic calculation.', await res.text());
@@ -380,7 +716,9 @@ export default function Home() {
 
       const pptx = await generatePptx(pdfFile, timings, musicBlob);
       setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx, musicSrt: srt });
+      setMusicDiagnostics(diagnostics);
+      setMusicTimings(timings);
+      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx, musicSrt: srt, musicDiagnostics: diagnostics ?? undefined, musicTimings: timings, textModel }, normalizedOwnerEmail);
       setToast('音樂簡報已生成！'); loadHistory();
     } catch (e) {
       setStep7State({ status: 'error', error: String(e) }); setToast('音樂簡報生成失敗：' + String(e));
@@ -391,17 +729,28 @@ export default function Home() {
     if (rec.speaker1) setSpeaker1(rec.speaker1); if (rec.speaker2) setSpeaker2(rec.speaker2);
     if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); if (rec.tone) setTone(rec.tone);
     if (rec.voice1) setVoice1(rec.voice1); if (rec.voice2) setVoice2(rec.voice2);
+    if (rec.textModel) setTextModel(rec.textModel);
+    if (rec.ttsModel) setTtsModel(rec.ttsModel);
+    if (rec.musicModel) setMusicModel(rec.musicModel);
     if (rec.styleId) setStyleId(rec.styleId); if (rec.lyricsDuration) setLyricsDuration(rec.lyricsDuration);
     if (rec.pdfBlob) setPdfFile(new File([rec.pdfBlob], rec.pdfName, { type: 'application/pdf' }));
     if (rec.slides) { setSlides(rec.slides); setStep1State({ status: 'done' }); }
     if (rec.script) { setScript(rec.script); setStep2State({ status: 'done' }); }
     if (rec.podcastBlob) { setPodcastBlob(rec.podcastBlob); setStep3State({ status: 'done' }); }
+    setPodcastInputMode(rec.podcastSource ?? 'api');
+    setPodcastSource(rec.podcastSource ?? 'api');
     if (rec.podcastPptxBlob) { setPodcastPptxBlob(rec.podcastPptxBlob); setStep4State({ status: 'done' }); }
     if (rec.lyrics) { setLyrics(rec.lyrics); setStep5State({ status: 'done' }); }
     if (rec.musicBlob) { setMusicBlob(rec.musicBlob); setStep6State({ status: 'done' }); }
+    setMusicInputMode(rec.musicSource ?? 'api');
+    setMusicSource(rec.musicSource ?? 'api');
     if (rec.musicPptxBlob) { setMusicPptxBlob(rec.musicPptxBlob); setStep7State({ status: 'done' }); }
     if (rec.podcastSrt) setPodcastSrt(rec.podcastSrt); else setPodcastSrt('');
+    if (rec.podcastDiagnostics) setPodcastDiagnostics(rec.podcastDiagnostics); else setPodcastDiagnostics(null);
+    if (rec.podcastTimings) setPodcastTimings(rec.podcastTimings); else setPodcastTimings(null);
     if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
+    if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
+    if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
     setRecordId(rec.id); setDrawerOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' }); setToast(`已載入：${rec.pdfName}`);
   }
@@ -409,7 +758,17 @@ export default function Home() {
   function handleNewProject() {
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
+    setPodcastInputMode('api');
+    setPodcastSource('api');
+    setMusicInputMode('api');
+    setMusicSource('api');
     setPodcastSrt(''); setMusicSrt('');
+    setPodcastDiagnostics(null);
+    setMusicDiagnostics(null);
+    setPodcastSrtOffset(0);
+    setMusicSrtOffset(0);
+    setPodcastTimings(null);
+    setMusicTimings(null);
     setStep1State({ status: 'idle' }); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
     setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
@@ -428,6 +787,29 @@ export default function Home() {
   const selectCls = `w-full border rounded-xl px-3 py-1.5 text-xs appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-600/30 transition-all ${t.select}`;
   const labelCls = `block text-[10px] uppercase tracking-widest font-bold mb-1 ${t.label}`;
   const errBox = `mt-3 text-[11px] rounded-xl p-3 ${dark ? 'text-red-400 bg-red-900/20' : 'text-red-500 bg-red-50'}`;
+
+  if (authEnabled && !authReady) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${t.page}`}>
+        <div className={`rounded-3xl border px-6 py-5 text-sm ${t.card}`}>
+          正在檢查登入狀態...
+        </div>
+      </div>
+    );
+  }
+
+  if (authEnabled && !authToken) {
+    return (
+      <>
+        <LoginPage
+          dark={dark}
+          onToggleTheme={() => setDark((value) => !value)}
+          onLogin={handleLoginSuccess}
+        />
+        {toast && <Toast message={toast} onClose={() => setToast('')} />}
+      </>
+    );
+  }
 
   // ─── JSX ──────────────────────────────────────
   return (
@@ -469,6 +851,11 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {authEnabled && authEmail && (
+              <div className={`hidden md:flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold ${dark ? 'border-emerald-900/70 bg-emerald-950/40 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                {authEmail}
+              </div>
+            )}
             {/* Dark / Light toggle */}
             <button
               onClick={() => setDark(d => !d)}
@@ -486,6 +873,14 @@ export default function Home() {
                 }`}>
               歷史紀錄
             </button>
+            {authEnabled && (
+              <button
+                onClick={handleLogout}
+                className={`text-[11px] font-semibold border rounded-full px-4 py-1.5 transition-all ${dark ? 'text-slate-400 border-slate-600 hover:text-red-400 hover:border-red-700' : 'text-slate-500 border-slate-200 hover:text-red-500 hover:border-red-300'}`}
+              >
+                登出
+              </button>
+            )}
           </div>
         </div>
       </header>
@@ -501,6 +896,11 @@ export default function Home() {
 
           {/* API Key */}
           <div className={`mb-4 p-3.5 rounded-xl border ${t.inner}`}>
+            {authEnabled && authEmail && (
+              <div className={`mb-3 rounded-xl border px-3 py-2 text-[11px] ${dark ? 'border-emerald-900/60 bg-emerald-950/30 text-emerald-300' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                已登入帳號：{authEmail}
+              </div>
+            )}
             <label className={labelCls}>Gemini API Key</label>
             <div className="flex gap-2">
               <input type="password" value={apiKeyInput} onChange={e => setApiKeyInput(e.target.value)}
@@ -562,6 +962,27 @@ export default function Home() {
               </select>
             </div>
           </div>
+
+          <div className="grid grid-cols-1 gap-3 mt-4">
+            <div>
+              <label className={labelCls}>Step 1 / 2 / 4 / 5 / 7 模型</label>
+              <select value={textModel} onChange={e => setTextModel(e.target.value)} className={selectCls}>
+                {TEXT_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Step 3 模型</label>
+              <select value={ttsModel} onChange={e => setTtsModel(e.target.value)} className={selectCls}>
+                {TTS_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Step 6 模型</label>
+              <select value={musicModel} onChange={e => setMusicModel(e.target.value)} className={selectCls}>
+                {MUSIC_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
         {/* ── Step 1: Upload PDF ── */}
@@ -589,7 +1010,7 @@ export default function Home() {
                   <span className="text-xl">📄</span>
                 </div>
                 <p className={`text-xs font-semibold ${t.muted}`}>拖拽或點擊上傳 PDF</p>
-                <p className={`text-[11px] ${t.faint}`}>建議 3–10 頁</p>
+                <p className={`text-[11px] ${t.faint}`}>建議 3-15 頁</p>
               </div>
             )}
           </div>
@@ -622,13 +1043,67 @@ export default function Home() {
         {/* ── Step 3 ── */}
         <div ref={step3Ref}>
           <StepCard step={3} title="生成 Podcast 音訊" state={step3State} disabled={!script} dark={dark}>
+            <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
+              {[
+                { id: 'api' as const, title: 'API 生成', desc: '使用目前的Podcast生成流程' },
+                { id: 'upload' as const, title: '上傳音訊', desc: '匯入外部工具生成的 Podcast 音訊' },
+              ].map(option => {
+                const active = podcastInputMode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    onClick={() => setPodcastInputMode(option.id)}
+                    disabled={step3State.status === 'loading'}
+                    className={`rounded-xl px-3 py-2 text-left transition-all border ${active
+                      ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
+                      : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
+                      } ${step3State.status === 'loading' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    <p className="text-xs font-bold">{option.title}</p>
+                    <p className={`text-[10px] mt-1 ${active ? '' : t.faint}`}>{option.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+
             {step3State.status === 'loading'
-              ? <LoadingBar message="正在生成雙人 TTS 音訊（約 30–60 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>}
+              ? <LoadingBar message={podcastInputMode === 'api' ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在匯入音訊檔案...'} dark={dark} />
+              : podcastInputMode === 'api' ? (
+                <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
+              ) : (
+                <div className="space-y-3">
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    先完成 Step 2 取得 Podcast 文稿，再把外部工具生成的音訊匯入這裡進行 AI 對齊。
+                  </p>
+                  <input
+                    ref={podcastUploadInputRef}
+                    type="file"
+                    accept={PODCAST_AUDIO_ACCEPT}
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handlePodcastUpload(file);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={() => podcastUploadInputRef.current?.click()}
+                    className={`w-full border-2 border-dashed rounded-2xl p-5 text-center transition-all ${dark ? 'border-slate-600 hover:border-emerald-600 hover:bg-emerald-900/15' : 'border-slate-200 hover:border-emerald-500 hover:bg-emerald-50'}`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto ${dark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                        <span className="text-xl">🎙️</span>
+                      </div>
+                      <p className={`text-xs font-semibold ${t.text}`}>{podcastBlob && podcastInputMode === 'upload' ? '重新上傳 Podcast 音訊' : '選擇 Podcast 音訊檔案'}</p>
+                      <p className={`text-[11px] ${t.faint}`}>支援常見格式：.mp3 / .wav / .m4a / .aac，檔案上限 50MB</p>
+                    </div>
+                  </button>
+                </div>
+              )}
             {podcastBlob && step3State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <AudioPlayer blob={podcastBlob} label="Podcast 音訊" dark={dark} />
-                <DownloadChip label="podcast.wav" onClick={() => downloadBlob(podcastBlob, 'podcast.mp3')} dark={dark} />
+                <AudioPlayer blob={podcastBlob} label={podcastSource === 'upload' ? '上傳的 Podcast' : 'AI 生成 Podcast'} dark={dark} />
+                <DownloadChip label={getPodcastDownloadName(podcastBlob)} onClick={() => downloadBlob(podcastBlob, getPodcastDownloadName(podcastBlob))} dark={dark} />
               </div>
             )}
             {step3State.error && <p className={errBox}>{step3State.error}</p>}
@@ -637,15 +1112,37 @@ export default function Home() {
 
         {/* ── Step 4 ── */}
         <div ref={step4Ref}>
-          <StepCard step={4} title="生成 Podcast 簡報 (AI 精準對齊)" state={step4State} disabled={!podcastBlob} dark={dark}>
+          <StepCard step={4} title="生成 Podcast 簡報 (AI 精準對齊)" state={step4State} disabled={!podcastBlob || !script} dark={dark}>
             {step4State.status === 'loading'
               ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGeneratePodcastPptx}>{step4State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>}
+              : (
+                <div className="space-y-3">
+                  <ActionBtn onClick={handleGeneratePodcastPptx}>{step4State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    對齊時會同時使用 Podcast 音訊與 Step 2 文稿，因此外部上傳音訊前也需要先保留對應文稿。
+                  </p>
+                </div>
+              )}
             {podcastPptxBlob && step4State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
+                {podcastDiagnostics && (
+                  <p className={`text-[11px] ${t.faint}`}>
+                    ASR 模式：{podcastDiagnostics.asrMode} ／ 字幕來源：{podcastDiagnostics.srtSource} ／ 對齊來源：{podcastDiagnostics.timingSource}
+                  </p>
+                )}
                 <DownloadChip label="podcast_slides.pptx" onClick={() => downloadBlob(podcastPptxBlob, 'podcast_slides.pptx')} dark={dark} />
-                {podcastSrt && <DownloadChip label="podcast.srt" onClick={() => downloadText(podcastSrt, 'podcast.srt')} dark={dark} />}
+                {podcastSrt && (
+                  <div className="inline-flex items-center">
+                    <DownloadChip label="podcast.srt" onClick={() => downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), 'podcast.srt')} dark={dark} />
+                    <OffsetSelect offset={podcastSrtOffset} onChange={setPodcastSrtOffset} dark={dark} />
+                    {podcastTimings && podcastSrtOffset !== 0 && (
+                      <button onClick={handleRepackPodcastPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
+                        套用偏移至轉場
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {step4State.error && <p className={errBox}>{step4State.error}</p>}
@@ -671,12 +1168,62 @@ export default function Home() {
         {/* ── Step 6 ── */}
         <div ref={step6Ref}>
           <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics} dark={dark}>
+            <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
+              {[
+                { id: 'api' as const, title: 'API 生成', desc: '使用目前的歌曲生成流程' },
+                { id: 'upload' as const, title: '上傳 mp3', desc: '匯入外部工具生成的音樂' },
+              ].map(option => {
+                const active = musicInputMode === option.id;
+                return (
+                  <button
+                    key={option.id}
+                    onClick={() => setMusicInputMode(option.id)}
+                    disabled={step6State.status === 'loading'}
+                    className={`rounded-xl px-3 py-2 text-left transition-all border ${active
+                      ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
+                      : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
+                      } ${step6State.status === 'loading' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                  >
+                    <p className="text-xs font-bold">{option.title}</p>
+                    <p className={`text-[10px] mt-1 ${active ? '' : t.faint}`}>{option.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
             {step6State.status === 'loading'
-              ? <LoadingBar message="正在生成 AI 歌曲（約 30–60 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>}
+              ? <LoadingBar message={musicInputMode === 'api' ? '正在生成 AI 歌曲（約 30–60 秒）...' : '正在匯入 mp3 音樂檔案...'} dark={dark} />
+              : musicInputMode === 'api' ? (
+                <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' && musicInputMode === 'api' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>
+              ) : (
+                <div className="space-y-3">
+                  <input
+                    ref={musicUploadInputRef}
+                    type="file"
+                    accept={MUSIC_AUDIO_ACCEPT}
+                    className="hidden"
+                    onChange={e => {
+                      const file = e.target.files?.[0];
+                      if (file) handleMusicUpload(file);
+                      e.currentTarget.value = '';
+                    }}
+                  />
+                  <button
+                    onClick={() => musicUploadInputRef.current?.click()}
+                    className={`w-full border-2 border-dashed rounded-2xl p-5 text-center transition-all ${dark ? 'border-slate-600 hover:border-emerald-600 hover:bg-emerald-900/15' : 'border-slate-200 hover:border-emerald-500 hover:bg-emerald-50'}`}
+                  >
+                    <div className="space-y-1.5">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center mx-auto ${dark ? 'bg-slate-700' : 'bg-slate-100'}`}>
+                        <span className="text-xl">🎵</span>
+                      </div>
+                      <p className={`text-xs font-semibold ${t.text}`}>{musicBlob && musicInputMode === 'upload' ? '重新上傳 mp3' : '選擇 mp3 音樂檔案'}</p>
+                      <p className={`text-[11px] ${t.faint}`}>支援外部 App 產生的 `.mp3` 檔</p>
+                    </div>
+                  </button>
+                </div>
+              )}
             {musicBlob && step6State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <AudioPlayer blob={musicBlob} label="AI 歌曲" dark={dark} />
+                <AudioPlayer blob={musicBlob} label={musicSource === 'upload' ? '上傳的歌曲' : 'AI 歌曲'} dark={dark} />
                 <DownloadChip label="music.mp3" onClick={() => downloadBlob(musicBlob, 'music.mp3')} dark={dark} />
               </div>
             )}
@@ -703,8 +1250,23 @@ export default function Home() {
             {musicPptxBlob && step7State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 歌曲段落畫面同步！</p>
+                {musicDiagnostics && (
+                  <p className={`text-[11px] ${t.faint}`}>
+                    ASR 模式：{musicDiagnostics.asrMode} ／ 字幕來源：{musicDiagnostics.srtSource} ／ 對齊來源：{musicDiagnostics.timingSource}
+                  </p>
+                )}
                 <DownloadChip label="music_slides.pptx" onClick={() => downloadBlob(musicPptxBlob, 'music_slides.pptx')} dark={dark} />
-                {musicSrt && <DownloadChip label="music.srt" onClick={() => downloadText(musicSrt, 'music.srt')} dark={dark} />}
+                {musicSrt && (
+                  <div className="inline-flex items-center">
+                    <DownloadChip label="music.srt" onClick={() => downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), 'music.srt')} dark={dark} />
+                    <OffsetSelect offset={musicSrtOffset} onChange={setMusicSrtOffset} dark={dark} />
+                    {musicTimings && musicSrtOffset !== 0 && (
+                      <button onClick={handleRepackMusicPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
+                        套用偏移至轉場
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
             )}
             {step7State.error && <p className={errBox}>{step7State.error}</p>}
@@ -728,8 +1290,8 @@ export default function Home() {
                   { label: 'slides.txt', avail: !!slides, fn: () => slides && downloadText(slides, 'slides.txt') },
                   { label: 'script.txt', avail: !!script, fn: () => script && downloadText(script, 'script.txt') },
                   { label: 'lyrics.txt', avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, 'lyrics.txt') },
-                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(podcastSrt, 'podcast.srt') },
-                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(musicSrt, 'music.srt') },
+                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), 'podcast.srt') },
+                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), 'music.srt') },
                 ].map(({ label, avail, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, false)}`}>
@@ -744,7 +1306,7 @@ export default function Home() {
               <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>🎧 音訊</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'podcast.wav', avail: !!podcastBlob, load: false, fn: () => podcastBlob && downloadBlob(podcastBlob, 'podcast.mp3') },
+                  { label: podcastBlob ? getPodcastDownloadName(podcastBlob) : 'podcast.mp3', avail: !!podcastBlob, load: false, fn: () => podcastBlob && downloadBlob(podcastBlob, getPodcastDownloadName(podcastBlob)) },
                   { label: 'music.mp3', avail: !!musicBlob, load: false, fn: () => musicBlob && downloadBlob(musicBlob, 'music.mp3') },
                 ].map(({ label, avail, load, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail && !load}
@@ -805,13 +1367,13 @@ export default function Home() {
                     <div className="flex flex-wrap gap-1.5">
                       {rec.script && <button onClick={() => downloadText(rec.script!, 'script.txt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓script</button>}
                       {rec.lyrics && <button onClick={() => downloadText(rec.lyrics!, 'lyrics.txt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓lyrics</button>}
-                      {rec.podcastBlob && <button onClick={() => downloadBlob(rec.podcastBlob!, 'podcast.mp3')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓podcast</button>}
+                      {rec.podcastBlob && <button onClick={() => downloadBlob(rec.podcastBlob!, getPodcastDownloadName(rec.podcastBlob!))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓{getPodcastDownloadName(rec.podcastBlob!)}</button>}
                       {rec.musicBlob && <button onClick={() => downloadBlob(rec.musicBlob!, 'music.mp3')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music</button>}
                       {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, 'podcast_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
                       {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, 'music_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
                       {rec.podcastSrt && <button onClick={() => downloadText(rec.podcastSrt!, 'podcast.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
                       {rec.musicSrt && <button onClick={() => downloadText(rec.musicSrt!, 'music.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
-                      <button onClick={() => { deleteRecord(rec.id); loadHistory(); }}
+                      <button onClick={() => { void deleteRecord(rec.id, normalizedOwnerEmail); void loadHistory(); }}
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ml-auto ${dark ? 'text-red-400 bg-red-900/30 hover:bg-red-900/50' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>刪除</button>
                     </div>
                   </div>

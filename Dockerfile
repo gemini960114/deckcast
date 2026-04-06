@@ -17,10 +17,15 @@ FROM node:20-alpine AS builder
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 
+ARG NEXT_PUBLIC_AUTH_ENABLED=false
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=
+
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_PUBLIC_AUTH_ENABLED=${NEXT_PUBLIC_AUTH_ENABLED}
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=${NEXT_PUBLIC_GOOGLE_CLIENT_ID}
 # Increase Node.js memory for large Next.js builds
 ENV NODE_OPTIONS="--max_old_space_size=2048"
 

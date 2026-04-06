@@ -35,6 +35,7 @@ docker-compose.yml
 *.swp
 *.swo
 Thumbs.db
+.codex-dev.log
 
 # ── TypeScript build info ──
 *.tsbuildinfo

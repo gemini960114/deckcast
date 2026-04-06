@@ -1,12 +1,13 @@
-# Podcast & Music Generator — spec_v03
+# DeckCast — spec_v04
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
-### ✨ v03 架構升級亮點：
-1. **精準 AI 對齊生成 (Two-step SRT) 與 三角定位法**：揚棄舊版基於字數粗略除法的時長猜測。對於「無頁碼段落」的困難文本，導入了「三角定位法 (Triangulation)」讓 AI 同步並列「原始腳本文稿、歌詞、高精準 SRT」，用邏輯語境自動對齊與測算 `<p:transition>` 轉場秒數，達成完美對齊。
+### ✨ v04 補充亮點（2026-04-06）：
+1. **精準 AI 對齊生成 (Two-step SRT) 與 `startSrtId` 契約統一**：對齊鏈已從舊版直接輸出秒數的 `vocalStartSec`，收斂為 `SRT -> startSrtId -> timings`。Phase 2 的任務是找每張投影片第一次進入時對應的字幕 id，再由程式換算轉場秒數。
 2. **Lyria 3 API 解析防呆與模型簡化**：徹底移除了 `30-second` 預設模型，目前全盤統一傳遞給 Lyria 3 Pro 模型。後端解析 response 時採用了「無序物件遍歷」，確保無論 Google API 的 `text` 或 `audio/mp3` 在 `parts` 陣列中的哪個位置全都能安全讀取。
-3. **雙層歌詞提示詞 (Dual-Layer Prompt)**：改寫了歌詞生成提示詞，強制輸出包含【音樂風格控制層】與含有精準分秒時間戳記的【結構描述層】，同時防範了 SRT 計算長度時的幻覺。
-4. **簡報特效優化與範圍放寬**：PDF 上傳範圍已放寬為 **3-10 張**。所有簡報換頁皆加入 XML `<p:fade/>` 淡化效果，且特別處理了「最後一頁關閉自動換頁」，防止播放結束直接跳掉黑屏。
+3. **機器解析優先的歌詞格式**：歌詞 prompt 已改為要求 `[段落名稱] [Slide N]`、禁止 AI 自行輸出時間軸、禁止用 `()` / `{}` 寫不可唱提示，並配合新的 slide anchor 摘要產生器。
+4. **登入與歷史紀錄隔離**：新增 invitation code + Google OAuth 雙重驗證、`AUTH_ENABLED` 開關、HMAC session token；當 `AUTH_ENABLED=true` 時，IndexedDB 歷史紀錄會依 Google email (`ownerEmail`) 隔離。
+5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-15 張**；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
 
 ---
 
@@ -22,9 +23,10 @@
 
 **架構**：
 - **Frontend**：Next.js App Router，`'use client'` 單頁應用
-- **Backend**：Next.js API Routes，純代理角色，轉發 Gemini API
-- **儲存**：瀏覽器 IndexedDB（含 Blob 儲存），不需後端資料庫
+- **Backend**：Next.js API Routes，兼任 Gemini 代理、Whisper 串接層、auth 驗證端點
+- **儲存**：瀏覽器 IndexedDB（含 Blob 儲存），不需後端資料庫；`AUTH_ENABLED=true` 時以 `ownerEmail` 做前端資料隔離
 - **BYOK**：使用者自備 Gemini API Key，存於 `sessionStorage`
+- **Auth**：可由 `.env.local` 控制是否啟用 Google OAuth + invitation code 雙重驗證
 
 ---
 
@@ -37,6 +39,7 @@
 | TypeScript | ^5 |
 | Tailwind CSS | ^4 |
 | @google/genai | ^1.46.0 |
+| google-auth-library | ^10.6.2 |
 | pdfjs-dist | ^5.5.207 |
 | pptxgenjs | ^4.0.1 |
 | jszip | ^3.10.1 |
@@ -51,7 +54,7 @@
 npx create-next-app@16.2.1 pocast2 --typescript --tailwind --app --no-src-dir --no-import-alias
 cd pocast2
 
-npm install @google/genai idb jszip pptxgenjs pdfjs-dist lamejs
+npm install @google/genai google-auth-library idb jszip pptxgenjs pdfjs-dist lamejs
 npm install --save-dev @types/node
 
 # 複製 pdfjs worker 到 public/
@@ -132,6 +135,9 @@ pocast2/
 │   ├── page.tsx           ← 主應用（~900 行）
 │   ├── globals.css
 │   └── api/
+│       ├── auth/
+│       │   ├── google/route.ts
+│       │   └── login/route.ts
 │       ├── parse-pdf/route.ts
 │       ├── generate-script/route.ts
 │       ├── generate-lyrics/route.ts
@@ -139,15 +145,21 @@ pocast2/
 │       ├── generate-music/route.ts
 │       ├── align-podcast/route.ts
 │       └── align-music/route.ts
+├── components/
+│   └── LoginPage.tsx      ← auth 啟用時的登入頁
 ├── lib/
-│   ├── constants.ts       ← 所有常數與提示詞
+│   ├── constants.ts       ← 所有常數、上傳規則與 API key/session key 常數
 │   ├── types.ts           ← TypeScript 型別
-│   ├── getAI.ts           ← Gemini 初始化（server side）
-│   ├── apiFetch.ts        ← fetch 封裝（client side）
+│   ├── auth.ts            ← server-side auth, token, rate limit, Google verify
+│   ├── authClient.ts      ← client-side auth session 存取
+│   ├── getAI.ts           ← Gemini 初始化（server side）+ session 驗證
+│   ├── apiFetch.ts        ← fetch 封裝（client side），同時帶 API key 與 auth token
 │   ├── prompts.ts         ← 提示詞建構函式
 │   ├── stripMarkdown.ts   ← 移除 Markdown 標記
-│   ├── db.ts              ← IndexedDB CRUD
-│   ├── timing.ts          ← 音訊時間計算
+│   ├── db.ts              ← IndexedDB CRUD + owner 驗證
+│   ├── timing.ts          ← 音訊時間計算與 fallback
+│   ├── srt.ts             ← SRT 解析、修補、格式化
+│   ├── whisper.ts         ← Whisper API 串接
 │   ├── generatePptx.ts    ← PPTX 生成（client side）
 │   ├── pdfToImages.ts     ← PDF 轉圖（含 getAudioDuration）
 │   └── empty-module.js    ← webpack fallback
@@ -169,9 +181,10 @@ const ai = new GoogleGenAI({ apiKey: 'YOUR_KEY' });
 ### 8.2 模型清單
 
 ```
-gemini-3-flash-preview       → 文字生成（文稿、歌詞、PDF 解析）
-gemini-2.5-flash-preview-tts → 多人 TTS 語音合成
-lyria-3-pro-preview          → AI 音樂生成
+Step 1 / 2 / 4 / 5 / 7 → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash
+Step 3                 → gemini-2.5-pro-preview-tts / gemini-2.5-flash-preview-tts（預設）
+Step 6                 → lyria-3-pro-preview（預設）
+Whisper（若啟用）      → whisper-Breeze-ASR-25
 ```
 
 ### 8.3 文字生成（PDF 解析、文稿、歌詞）
@@ -273,6 +286,36 @@ const apiKey = decodeApiKey(encoded);
 
 ---
 
+## 9.1 可開關的登入機制
+
+系統新增一層可由 `.env.local` 控制的 auth：
+
+```env
+AUTH_ENABLED=true|false
+NEXT_PUBLIC_AUTH_ENABLED=true|false
+INVITATION_CODE=ai4all
+SESSION_SECRET=...
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+NEXT_PUBLIC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+```
+
+規則如下：
+- `AUTH_ENABLED=false`：不啟用登入頁，系統維持原本 BYOK 模式
+- `AUTH_ENABLED=true`：必須先通過 invitation code + Google ID token 驗證，前端才會進入主工作台
+- API 呼叫時同時帶：
+  - `X-Gemini-Key`：BYOK API key
+  - `Authorization: Bearer <session token>`：登入後取得的 session token
+
+`/api/auth/google` 的流程：
+1. 驗證 invitation code
+2. 用 `google-auth-library` 驗證 Google ID token
+3. 以 `SESSION_SECRET` 產生 24 小時有效的 HMAC session token
+4. 回傳 `{ token, email }`
+
+登入頁由 `components/LoginPage.tsx` 提供，使用 Google Identity Services 前端按鈕，不需要 client secret。
+
+---
+
 ## 10. lib/constants.ts（完整）
 
 ```typescript
@@ -280,9 +323,24 @@ export const API_KEY_HEADER = 'X-Gemini-Key';
 export const API_KEY_SEED   = 'pcast-gen-2024';
 export const SESSION_KEY    = 'gemini_key';
 
-export const MODEL_TEXT  = 'gemini-3-flash-preview';
-export const MODEL_MUSIC = 'lyria-3-pro-preview';
-export const MODEL_TTS   = 'gemini-2.5-flash-preview-tts';
+export const TEXT_MODEL_OPTIONS = [
+  { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
+  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview（預設）' },
+  { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+] as const;
+
+export const TTS_MODEL_OPTIONS = [
+  { value: 'gemini-2.5-pro-preview-tts', label: 'gemini-2.5-pro-preview-tts' },
+  { value: 'gemini-2.5-flash-preview-tts', label: 'gemini-2.5-flash-preview-tts（預設）' },
+] as const;
+
+export const MUSIC_MODEL_OPTIONS = [
+  { value: 'lyria-3-pro-preview', label: 'lyria-3-pro-preview（預設）' },
+] as const;
+
+export const DEFAULT_TEXT_MODEL  = 'gemini-3-flash-preview';
+export const DEFAULT_TTS_MODEL   = 'gemini-2.5-flash-preview-tts';
+export const DEFAULT_MUSIC_MODEL = 'lyria-3-pro-preview';
 
 export const DEFAULT_SPEAKER1        = '男生為節目主持人';
 export const DEFAULT_SPEAKER2        = '女生為高師大的老師 Mary 老師（具教學經驗，說明清楚）';
@@ -796,14 +854,16 @@ export async function generatePptx(
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { MODEL_TEXT, PARSE_PDF_PROMPT } from '@/lib/constants';
+import { resolveTextModel } from '@/lib/constants';
+import { PARSE_PDF_PROMPT } from '@/lib/prompts';
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { pdf } = await req.json() as { pdf: string };
+    const { pdf, textModel } = await req.json() as { pdf: string; textModel?: string };
+    const modelName = resolveTextModel(textModel);
     const response = await ai.models.generateContent({
-      model: MODEL_TEXT,
+      model: modelName,
       contents: [{ parts: [{ text: PARSE_PDF_PROMPT }, { inlineData: { mimeType: 'application/pdf', data: pdf } }] }],
     });
     const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -822,15 +882,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { buildPodcastPrompt } from '@/lib/prompts';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { MODEL_TEXT } from '@/lib/constants';
+import { resolveTextModel } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { slides, speaker1, speaker2, dialogueStyle, tone } = await req.json();
+    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel } = await req.json();
+    const modelName = resolveTextModel(textModel);
     const prompt = buildPodcastPrompt({ speaker1, speaker2, dialogueStyle, tone });
     const response = await ai.models.generateContent({
-      model: MODEL_TEXT,
+      model: modelName,
       contents: [{ parts: [{ text: `${prompt}\n\n${slides}` }] }],
     });
     const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -850,16 +911,17 @@ import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { buildLyricsPrompt } from '@/lib/prompts';
 import { MUSIC_STYLES } from '@/lib/types';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { MODEL_TEXT, DEFAULT_LYRICS_DURATION } from '@/lib/constants';
+import { DEFAULT_LYRICS_DURATION, resolveTextModel } from '@/lib/constants';
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { script, styleId, duration = DEFAULT_LYRICS_DURATION } = await req.json();
+    const { script, styleId, duration = DEFAULT_LYRICS_DURATION, textModel } = await req.json();
+    const modelName = resolveTextModel(textModel);
     const styleLabel = MUSIC_STYLES.find(s => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
     const prompt = buildLyricsPrompt(styleLabel, duration);
     const response = await ai.models.generateContent({
-      model: MODEL_TEXT,
+      model: modelName,
       contents: [{ parts: [{ text: `${prompt}\n\n${script}` }] }],
     });
     const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
@@ -876,7 +938,7 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { MODEL_TTS, DEFAULT_VOICE1, DEFAULT_VOICE2 } from '@/lib/constants';
+import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel } from '@/lib/constants';
 
 export const maxDuration = 300;
 
@@ -927,12 +989,13 @@ function extractDialogue(script: string): string {
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2 } = await req.json();
+    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel } = await req.json();
+    const modelName = resolveTtsModel(ttsModel);
     const dialogue = extractDialogue(script);
     if (!dialogue) return NextResponse.json({ error: 'No dialogue lines found in script' }, { status: 400 });
 
     const response = await ai.models.generateContent({
-      model: MODEL_TTS,
+      model: modelName,
       contents: [{ parts: [{ text: dialogue }] }],
       config: {
         responseModalities: ['AUDIO'],
@@ -977,16 +1040,16 @@ export async function POST(req: NextRequest) {
 ```typescript
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { MODEL_MUSIC } from '@/lib/constants';
+import { getMusicModel } from '@/lib/constants';
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { lyrics } = await req.json();
+    const { lyrics, duration, musicModel } = await req.json();
     const response = await ai.models.generateContent({
-      model: MODEL_MUSIC,
+      model: getMusicModel(duration ?? '90-second', musicModel),
       contents: [{ parts: [{ text: lyrics }] }],
       config: { responseModalities: ['AUDIO', 'TEXT'] },
     });
@@ -1061,6 +1124,9 @@ const [dialogueStyle, setDialogueStyle] = useState(DEFAULT_DIALOGUE_STYLE);
 const [tone, setTone] = useState(DEFAULT_TONE);
 const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
 const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
+const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
+const [ttsModel, setTtsModel] = useState<string>(DEFAULT_TTS_MODEL);
+const [musicModel, setMusicModel] = useState<string>(DEFAULT_MUSIC_MODEL);
 const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
 const [lyricsDuration, setLyricsDuration] = useState(DEFAULT_LYRICS_DURATION);
 
@@ -1128,8 +1194,8 @@ async function handlePdfUpload(file: File) {
     const arrayBuffer = await file.arrayBuffer();
     const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
     
-    if (pdfDoc.numPages < 5 || pdfDoc.numPages > 10) {
-      const msg = '請上傳 3-10 頁的範圍簡報檔案';
+    if (pdfDoc.numPages < 3 || pdfDoc.numPages > 15) {
+      const msg = '請上傳 3-15 頁的範圍簡報檔案';
       setStep1State({ status: 'error', error: msg });
       setToast(msg);
       return;
@@ -1404,10 +1470,11 @@ headers: { 'Content-Length': String(wavData.byteLength) }
 
 **症狀**：`npm run build` 時 `app/api/generate-podcast/route.ts` 報錯 `Type 'Uint8Array' is not assignable to type 'BodyInit'` 或 Buffer 相關轉換錯誤。
 **原因**：Next.js 在嚴格的 TypeScript 檢查下，部分 Node.js 基礎型別 (Buffer) 傳入 `NextResponse` 建構子不被允許。
-**解法**：將最終生成的音訊轉換為標準 `Uint8Array`，並在傳入時強制轉型為 `any` 繞過型別檢查。
+**解法**：將最終生成的 WAV 音訊包裝成標準 `Blob` 後再傳給 `NextResponse`，避免 `Uint8Array` / `ArrayBufferLike` 的型別衝突。
 ```typescript
 const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
-return new NextResponse(wavData as any, { headers: { ... } });
+const wavBody = new Blob([Uint8Array.from(wavData)], { type: 'audio/wav' });
+return new NextResponse(wavBody, { headers: { ... } });
 ```
 
 ---
@@ -1419,30 +1486,55 @@ return new NextResponse(wavData as any, { headers: { ... } });
 - **Store**：`records`，keyPath: `id`
 - **儲存**：所有 Blob（PDF、音訊、PPTX）可直接存入 IndexedDB，取出後型別為 Blob
 - **還原 File**：`new File([rec.pdfBlob], rec.pdfName, { type: 'application/pdf' })`
+- **帳號隔離**：
+  - `AUTH_ENABLED=false`：所有本機歷史共用同一份 store
+  - `AUTH_ENABLED=true`：每筆紀錄額外帶 `ownerEmail`，並以 lowercase 正規化
+  - `getRecordsByOwner(ownerEmail)` 只回傳該 email 的紀錄
+  - `updateRecord(id, updates, ownerEmail)` / `deleteRecord(id, ownerEmail)` 會驗 owner，避免跨帳號修改或刪除
 
 ---
 
 ## 25. 完整工作流程圖
 
 ```
+若 AUTH_ENABLED=true：
+    invitation code + Google 登入
+        ↓
+    取得 session token（存 localStorage）
+        ↓
 使用者輸入 API Key（存 sessionStorage，關閉分頁清除）
     ↓
 Step 0：設定說話者角色、TTS 聲音、歌曲風格、歌詞長度
     ↓
 Step 1：上傳 PDF → FileReader base64 → /api/parse-pdf → Gemini 原生解析 → slides 文字
-    ↓  建立 IndexedDB 紀錄（存 pdfBlob + 設定）
-Step 2：/api/generate-script → Gemini → Podcast 對話文稿（含投影片標題行）
+    ↓  建立 IndexedDB 紀錄（存 pdfBlob + 設定 + ownerEmail）
+Step 2：/api/generate-script → Gemini → Podcast 對話文稿
     ↓  updateRecord(script + speaker settings)
-Step 3：/api/generate-lyrics → Gemini → AI 歌詞
+Step 3：生成 Podcast 音訊
+    ├─ API 路徑：/api/generate-podcast → extractDialogue → Gemini TTS → PCM→WAV
+    └─ Upload 路徑：接受 mp3 / wav / m4a / aac
+    ↓  updateRecord(podcastBlob + podcastSource + voice settings)
+Step 4：/api/align-podcast
+    ↓  Whisper/Gemini 產出 SRT
+    ↓  Gemini 找每頁 startSrtId
+    ↓  buildSlideTimingsFromSrtIds / fallback
+    ↓  generatePptx(pdf, timings, podcastBlob)
+    ↓  updateRecord(podcastPptxBlob + podcastSrt + diagnostics + timings)
+Step 5：/api/generate-lyrics → Gemini → 機器解析友善歌詞（[Verse] [Slide N]）
     ↓  updateRecord(lyrics + style settings)
-Step 4：/api/generate-podcast → extractDialogue → Gemini TTS → PCM→WAV
-    ↓  updateRecord(podcastBlob + voice settings)
-Step 5：/api/generate-music → Lyria → MP3
-    ↓  updateRecord(musicBlob)
-    ↓  [背景] calcPodcastTimings + calcMusicTimings → generatePptx × 2
-        → updateRecord(podcastPptxBlob + musicPptxBlob)
+Step 6：生成歌曲音訊
+    ├─ API 路徑：/api/generate-music → Lyria → MP3
+    └─ Upload 路徑：接受 mp3
+    ↓  updateRecord(musicBlob + musicSource)
+Step 7：/api/align-music
+    ↓  Whisper/Gemini 產出 SRT
+    ↓  建立 slide anchor summary
+    ↓  Gemini 找每頁 startSrtId
+    ↓  buildSlideTimingsFromSrtIds / lyrics-weight fallback
+    ↓  generatePptx(pdf, timings, musicBlob)
+    ↓  updateRecord(musicPptxBlob + musicSrt + diagnostics + timings)
     ↓
-下載：script.txt / lyrics.txt / podcast.wav / music.mp3 / podcast_slides.pptx / music_slides.pptx
+下載：script.txt / lyrics.txt / podcast.wav(or 原始上傳格式) / music.mp3 / podcast.srt / music.srt / podcast_slides.pptx / music_slides.pptx
 ```
 
 ---
@@ -1470,7 +1562,7 @@ Step 5：/api/generate-music → Lyria → MP3
 為防止惡意使用者上傳百頁以上的大型文獻檔，耗盡使用者的 Gemini Token 額度，在 `app/page.tsx` 實作前端邊界攔截：
 1. **副檔名與 Type 檢查**：非 PDF 拒絕上傳。
 2. **CDN 套件頁數檢查**：透過動態載入的 WebpackIgnore 版 `pdfjs-dist` 預先讀取檔案陣列 (`ArrayBuffer`) 解析 `numPages`。
-3. **3–10 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
+3. **3-15 頁防呆機制**：若頁數不在此範圍，直接中斷執行並拋出前端錯誤通知，**絕不**將超過限制的 PDF 送往後端與 Gemini 解析，達到零空耗 Token 的防護。
 
 ---
 

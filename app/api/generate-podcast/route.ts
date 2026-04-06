@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { MODEL_TTS, DEFAULT_VOICE1, DEFAULT_VOICE2 } from '@/lib/constants';
+import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel } from '@/lib/constants';
 
 export const maxDuration = 300;
 
@@ -50,7 +50,8 @@ function extractDialogue(script: string): string {
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2 } = await req.json();
+    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel } = await req.json();
+    const modelName = resolveTtsModel(ttsModel);
 
     const dialogue = extractDialogue(script);
     if (!dialogue) {
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
     }
 
     const response = await ai.models.generateContent({
-      model: MODEL_TTS,
+      model: modelName,
       contents: [{ parts: [{ text: dialogue }] }],
       config: {
         responseModalities: ['AUDIO'],
@@ -87,8 +88,9 @@ export async function POST(req: NextRequest) {
     const pcmData = Buffer.from(audioData, 'base64');
     const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
     const wavUint8Array = new Uint8Array(wavData.buffer, wavData.byteOffset, wavData.byteLength);
+    const wavBody = new Blob([Uint8Array.from(wavUint8Array)], { type: 'audio/wav' });
 
-    return new NextResponse(wavUint8Array as any, {
+    return new NextResponse(wavBody, {
       headers: {
         'Content-Type': 'audio/wav',
         'Content-Length': String(wavUint8Array.byteLength),
@@ -96,8 +98,8 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err: unknown) {
-    if (err instanceof Error && err.message === 'Missing API Key') {
-      return unauthorizedResponse();
+    if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
+      return unauthorizedResponse(err);
     }
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
