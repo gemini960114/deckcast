@@ -12,7 +12,7 @@
 ### ✨ v05 補充亮點（2026-04-07）：
 1. **模型選單收斂為四組**：Step 0 目前改為 `Step 1 / 4.1 / 7.1`、`Step 2 / 4.2 / 5 / 7.2`、`Step 3`、`Step 6` 四組模型下拉，UI 與後端實際能力一致。
 2. **Podcast / Music 對齊正式拆為雙階段**：`4.1 / 7.1` 固定負責多模態音訊理解與字幕修正；`4.2 / 7.2` 固定負責 `script/lyrics + SRT` 的文字對齊與 `startSrtId` 推斷。
-3. **導入本地 OpenAI-compatible LLM**：純文字推理步驟可改接本地 `gemma-4-31B-it`，由 `lib/llm.ts` 統一處理 Gemini 與 OpenAI-compatible provider 分流。
+3. **導入 provider-aware 文字模型選單**：純文字推理步驟現在可同時區分 Google Gemma 與 OpenAI-compatible Gemma，由 `id + provider + model + label` 決定真正走哪條 provider。
 4. **Markdown code fence 保留正文**：`stripMarkdown()` 不再把 fenced code block 內文整段刪除，只移除外層 ``` 包裝，避免本地模型輸出被誤清空。
 5. **PPTX 音訊 timing XML 補寫**：`generatePptx()` 目前不只嵌入第一頁音訊，還會補寫 `<p:timing>`、`numSld` 與 `spTgt`，讓 PowerPoint 更接近自動播放與跨頁持續播放的行為。
 
@@ -333,7 +333,7 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
 LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
 LOCAL_LLM_MODEL=gemma-4-31B-it
-LOCAL_LLM_LABEL=Gemma 4
+LOCAL_LLM_LABEL=Gemma 4 31B (Custom)
 ```
 
 規則如下：
@@ -341,7 +341,7 @@ LOCAL_LLM_LABEL=Gemma 4
 - 若 `LOCAL_LLM_BASE_URL` 只填到 `/v1`，程式會自動補上 `/chat/completions`。
 - `generateText()` 會先判斷模型是否為 Gemini；若不是，則改走 OpenAI-compatible 路徑。
 - 若設定了 `LOCAL_LLM_MODEL`，本地路徑實際送出的 `model` 會優先使用此值。
-- `LOCAL_LLM_LABEL` 只影響 UI 顯示名稱，方便將同一個模型 id 包裝成較友善的名稱，例如 `Gemma 4`、`Qwen 32B`。
+- `LOCAL_LLM_LABEL` 只影響 UI 顯示名稱，方便將同一個模型 id 包裝成較友善的名稱，例如 `Gemma 4 31B (Custom)`、`Qwen 32B`。
 
 ---
 
@@ -367,7 +367,7 @@ export const MUSIC_MODEL_OPTIONS = [
   { value: 'lyria-3-pro-preview', label: 'lyria-3-pro-preview（預設）' },
 ] as const;
 
-export const DEFAULT_TEXT_MODEL  = 'gemini-3-flash-preview';
+export const DEFAULT_TEXT_MODEL  = 'custom-gemma-4-31b';
 export const DEFAULT_TTS_MODEL   = 'gemini-2.5-flash-preview-tts';
 export const DEFAULT_MUSIC_MODEL = 'lyria-3-pro-preview';
 

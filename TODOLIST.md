@@ -36,6 +36,7 @@
 - [x] **Whisper + Gemini 混合 ASR**：新增 `lib/whisper.ts` 與 `lib/srt.ts`，將 Whisper 逐字稿、Gemini SRT、文字修正與 fallback 整理成共用模組
 - [x] **音訊 MIME 一致性**：`align-podcast` / `align-music` 接收前端傳入的 `audioMimeType`，不再寫死 `audio/wav`
 - [x] **本地 OpenAI-compatible LLM Provider**：新增 `lib/llm.ts`，讓 `Step 2 / 4.2 / 5 / 7.2` 可切到 `gemma-4-31B-it`
+- [x] **文字模型改為 provider-aware 結構**：`TEXT_MODEL_OPTIONS` 目前改為 `id + provider + model + label`，可同時區分 `Gemma 4 31B (Google)` 與 `Gemma 4 31B (Custom)`
 
 ## 5. 前端流程 UI 與簡報 (PPTX) 渲染
 - [x] 實作嚴謹的順序解鎖流程流：PDF -> Podcast 文稿 -> Podcast 音訊/上傳 -> Podcast 簡報 -> 歌詞 -> 音樂音訊/上傳 -> 音樂簡報

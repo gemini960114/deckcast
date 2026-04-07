@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { isGeminiModel, resolveTextModel } from './constants';
+import { resolveTextModelOption } from './constants';
 import { getGeminiAI } from './getAI';
 import { requireSession } from './auth';
 
@@ -43,7 +43,7 @@ export function isLocalLlmConfigured(): boolean {
 }
 
 export function modelNeedsGemini(model?: string): boolean {
-  return isGeminiModel(resolveTextModel(model));
+  return resolveTextModelOption(model).provider === 'gemini';
 }
 
 export async function generateText(req: NextRequest, params: {
@@ -52,12 +52,12 @@ export async function generateText(req: NextRequest, params: {
   expectJson?: boolean;
 }): Promise<string> {
   requireSession(req);
-  const requestedModel = resolveTextModel(params.model);
+  const requestedModel = resolveTextModelOption(params.model);
 
-  if (isGeminiModel(requestedModel)) {
+  if (requestedModel.provider === 'gemini') {
     const ai = getGeminiAI(req);
     const response = await ai.models.generateContent({
-      model: requestedModel,
+      model: requestedModel.model,
       contents: [{ parts: [{ text: params.prompt }] }],
       ...(params.expectJson ? { config: { responseMimeType: 'application/json' } } : {}),
     });
@@ -69,7 +69,7 @@ export async function generateText(req: NextRequest, params: {
     throw new Error('Missing LOCAL_LLM_BASE_URL or LOCAL_LLM_API_KEY');
   }
 
-  const model = getLocalLlmModel() || requestedModel;
+  const model = getLocalLlmModel() || requestedModel.model;
 
   const response = await fetch(getLocalChatCompletionsUrl(), {
     method: 'POST',

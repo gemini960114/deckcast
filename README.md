@@ -169,7 +169,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 ### 模型選擇
 
 - `Step 1 / 4.1 / 7.1`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
-- `Step 2 / 4.2 / 5 / 7.2`：預設為 `gemini-3-flash-preview`；當 `LOCAL_LLM_*` 已完整設定時，第二組會額外出現 `Gemma 4`，並自動成為預設（實際模型名稱 `gemma-4-31B-it`）
+- `Step 2 / 4.2 / 5 / 7.2`：目前以 provider-aware 方式區分模型，預設為 `Gemma 4 31B (Custom)`；同時可選 `Gemma 4 26B (Google)`、`Gemma 4 31B (Google)` 與 Gemini 系列
 - `Step 3`：`gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設）
 - `Step 6`：`lyria-3-pro-preview`（預設）
 - 這些選擇會隨專案紀錄一起存入 IndexedDB，重新載入歷史紀錄時會自動還原
@@ -194,7 +194,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 | 流程 | 可選模型 |
 |---|---|
 | Step 1 / 4.1 / 7.1 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
-| Step 2 / 4.2 / 5 / 7.2 | 預設為 `gemini-3-flash-preview`；當 `LOCAL_LLM_*` 已完整設定時，會額外出現 `Gemma 4`，並自動成為預設（實際模型名稱 `gemma-4-31B-it`） |
+| Step 2 / 4.2 / 5 / 7.2 | `Gemini 3.1 Pro` / `Gemini 3 Flash` / `Gemini 2.5 Flash` / `Gemma 4 26B (Google)` / `Gemma 4 31B (Google)` / `Gemma 4 31B (Custom, 預設)` |
 | Step 3 | `gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設） |
 | Step 6 | `lyria-3-pro-preview`（預設） |
 | Whisper 對齊（若啟用） | `whisper-Breeze-ASR-25`（可由 `NCHC_WHISPER_MODEL` 覆蓋） |
@@ -279,7 +279,7 @@ NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
 LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
 LOCAL_LLM_MODEL=gemma-4-31B-it
-LOCAL_LLM_LABEL=Gemma 4
+LOCAL_LLM_LABEL=Gemma 4 31B (Custom)
 ```
 
 說明：
@@ -289,7 +289,7 @@ LOCAL_LLM_LABEL=Gemma 4
 - 只有在 `LOCAL_LLM_BASE_URL` 與 `LOCAL_LLM_API_KEY` 都存在時，設定區第二組模型下拉才會顯示本地模型選項
 - 若 `LOCAL_LLM_BASE_URL` 已直接填到 `/chat/completions`，程式會直接使用；若只填到 `/v1`，則會自動補上 `/chat/completions`
 - `LOCAL_LLM_MODEL` 為本地模型實際送出的模型名稱，若有設定，會優先覆蓋前端同組下拉選單的本地模型值
-- `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4`
+- `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4 31B (Custom)`
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---
@@ -365,7 +365,7 @@ gcloud config set project gen-lang-client-0039151647
 # 3. 提交 Cloud Build 部署
 #    ⚠️ 重要：在 PowerShell 中 --substitutions 值必須用雙引號包住，
 #    否則 PowerShell 會把逗號當陣列分隔符，導致環境變數設定錯誤。
-gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4"
+gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
 ```
 
 #### 補充說明
