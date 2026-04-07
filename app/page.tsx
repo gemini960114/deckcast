@@ -14,7 +14,7 @@ import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
   DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE,
   DEFAULT_VOICE1, DEFAULT_VOICE2, DEFAULT_STYLE_ID, DEFAULT_LYRICS_DURATION,
-  DEFAULT_TEXT_MODEL, DEFAULT_MULTIMODAL_MODEL, DEFAULT_TTS_MODEL, DEFAULT_MUSIC_MODEL,
+  DEFAULT_TEXT_MODEL, DEFAULT_LOCAL_TEXT_MODEL, DEFAULT_MULTIMODAL_MODEL, DEFAULT_TTS_MODEL, DEFAULT_MUSIC_MODEL,
   TEXT_MODEL_OPTIONS, MULTIMODAL_MODEL_OPTIONS, TTS_MODEL_OPTIONS, MUSIC_MODEL_OPTIONS,
   LYRICS_DURATIONS, voiceSampleUrl,
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
@@ -255,6 +255,8 @@ export default function Home() {
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
   const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
+  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
+  const [localLlmLabel, setLocalLlmLabel] = useState('Gemma 4');
   const [ttsModel, setTtsModel] = useState<string>(DEFAULT_TTS_MODEL);
   const [musicModel, setMusicModel] = useState<string>(DEFAULT_MUSIC_MODEL);
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
@@ -304,6 +306,11 @@ export default function Home() {
 
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
+  const textModelOptions = localLlmEnabled
+    ? TEXT_MODEL_OPTIONS.map(option => option.value === DEFAULT_LOCAL_TEXT_MODEL
+      ? { ...option, label: `${localLlmLabel}（預設）` }
+      : option)
+    : TEXT_MODEL_OPTIONS.filter(option => option.value !== DEFAULT_LOCAL_TEXT_MODEL);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(SESSION_KEY);
@@ -333,6 +340,30 @@ export default function Home() {
 
     setAuthReady(true);
   }, [authEnabled]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/runtime-config', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string };
+        const enabled = Boolean(data.localLlmEnabled);
+        const label = data.localLlmLabel?.trim() || 'Gemma 4';
+        setLocalLlmEnabled(enabled);
+        setLocalLlmLabel(label);
+        setTextModel(prev => {
+          if (enabled) {
+            return prev === DEFAULT_TEXT_MODEL ? DEFAULT_LOCAL_TEXT_MODEL : prev;
+          }
+          return prev === DEFAULT_LOCAL_TEXT_MODEL ? DEFAULT_TEXT_MODEL : prev;
+        });
+      } catch {
+        setLocalLlmEnabled(false);
+        setLocalLlmLabel('Gemma 4');
+        setTextModel(prev => prev === DEFAULT_LOCAL_TEXT_MODEL ? DEFAULT_TEXT_MODEL : prev);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!authReady) return;
@@ -765,10 +796,10 @@ export default function Home() {
     else if (rec.step41Model) setMultimodalModel(rec.step41Model);
     else if (rec.step71Model) setMultimodalModel(rec.step71Model);
     else setMultimodalModel(DEFAULT_MULTIMODAL_MODEL);
-    if (rec.textModel) setTextModel(rec.textModel);
-    else if (rec.step42Model) setTextModel(rec.step42Model);
-    else if (rec.step72Model) setTextModel(rec.step72Model);
-    else setTextModel(DEFAULT_TEXT_MODEL);
+    const savedTextModel = rec.textModel ?? rec.step42Model ?? rec.step72Model;
+    if (savedTextModel === DEFAULT_LOCAL_TEXT_MODEL && !localLlmEnabled) setTextModel(DEFAULT_TEXT_MODEL);
+    else if (savedTextModel) setTextModel(savedTextModel);
+    else setTextModel(localLlmEnabled ? DEFAULT_LOCAL_TEXT_MODEL : DEFAULT_TEXT_MODEL);
     if (rec.ttsModel) setTtsModel(rec.ttsModel);
     if (rec.musicModel) setMusicModel(rec.musicModel);
     if (rec.styleId) setStyleId(rec.styleId); if (rec.lyricsDuration) setLyricsDuration(rec.lyricsDuration);
@@ -1012,8 +1043,8 @@ export default function Home() {
             <div>
               <label className={labelCls}>Step 2 / 4.2 / 5 / 7.2 模型</label>
               <select value={textModel} onChange={e => setTextModel(e.target.value)} className={selectCls}>
-                {TEXT_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-              </select>
+                  {textModelOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
             </div>
             <div>
               <label className={labelCls}>Step 3 模型</label>
@@ -1029,7 +1060,7 @@ export default function Home() {
             </div>
           </div>
           <p className={`mt-3 text-[11px] leading-relaxed ${t.faint}`}>
-            第一組用於 PDF 與 audio 這類多模態理解；第二組用於純文字推理與對齊。`gemma-4-31B-it` 目前只會出現在文字推理那組。
+            第一組用於 PDF 與 audio 這類多模態理解；第二組用於純文字推理與對齊。只有在已設定 `LOCAL_LLM_*` 時，第二組才會出現 <span className="font-semibold">{localLlmLabel}</span>。
           </p>
         </div>
 

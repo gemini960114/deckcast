@@ -48,6 +48,8 @@
 - [x] **登入頁設計**：新增獨立 `LoginPage`，當 `AUTH_ENABLED=true` 時先進登入頁，再進入主工作台
 - [x] **Podcast / Music 下載命名修正**：下載檔名改為與實際 Blob MIME 一致，避免 WAV 被誤命名為 MP3
 - [x] **模型設定簡化**：前端 state 收斂為 `multimodalModel` 與 `textModel` 兩個核心模型值，再映射到 Step 4 / Step 7 的 phase 參數
+- [x] **本地模型顯示名稱環境化**：新增 `LOCAL_LLM_LABEL`，讓 Step 0 第二組模型下拉可依部署環境顯示 `Gemma 4`、`Qwen 32B` 等自訂名稱
+- [x] **PPTX 音訊 timing 補寫**：`generatePptx.ts` 會在第一頁媒體物件上補寫 `<p:timing>` 與 `numSld`，讓 PowerPoint 更接近自動播放與跨頁持續播放
 
 ## 6. 後期測試與邊界除錯
 - [x] 清理舊程式碼：刪除不需要的手動 SRT 拼裝邏輯 (`extractSlideTexts`, `formatSrtTime`)

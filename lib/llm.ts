@@ -15,6 +15,16 @@ function getLocalLlmModel(): string {
   return (process.env.LOCAL_LLM_MODEL ?? '').trim();
 }
 
+export function getLocalLlmLabel(): string {
+  const label = (process.env.LOCAL_LLM_LABEL ?? '').trim();
+  if (label) return label;
+
+  const model = getLocalLlmModel();
+  if (model) return model;
+
+  return 'Gemma 4';
+}
+
 function getLocalChatCompletionsUrl(): string {
   const baseUrl = getLocalLlmBaseUrl();
   if (!baseUrl) {

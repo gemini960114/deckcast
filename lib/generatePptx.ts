@@ -9,6 +9,45 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
+function extractEmbeddedMediaShapeId(slideXml: string): string | null {
+  const match = slideXml.match(
+    /<p:cNvPr id="(\d+)"[^>]*>\s*<a:hlinkClick[^>]*action="ppaction:\/\/media"/,
+  );
+  return match?.[1] ?? null;
+}
+
+function buildEmbeddedAudioTimingXml(shapeId: string, slideCount: number): string {
+  const slideSpan = Math.max(1, slideCount);
+
+  return (
+    `<p:timing>` +
+      `<p:tnLst>` +
+        `<p:par>` +
+          `<p:cTn id="101" dur="indefinite" restart="never" nodeType="tmRoot">` +
+            `<p:childTnLst>` +
+              `<p:par>` +
+                `<p:cTn id="102" fill="hold" nodeType="clickEffect">` +
+                  `<p:stCondLst><p:cond delay="0"/></p:stCondLst>` +
+                  `<p:childTnLst>` +
+                    `<p:audio>` +
+                      `<p:cMediaNode vol="100000" mute="0" showWhenStopped="0" numSld="${slideSpan}">` +
+                        `<p:cTn id="103" fill="hold" nodeType="clickEffect">` +
+                          `<p:stCondLst><p:cond delay="0"/></p:stCondLst>` +
+                        `</p:cTn>` +
+                        `<p:tgtEl><p:spTgt spid="${shapeId}"/></p:tgtEl>` +
+                      `</p:cMediaNode>` +
+                    `</p:audio>` +
+                  `</p:childTnLst>` +
+                `</p:cTn>` +
+              `</p:par>` +
+            `</p:childTnLst>` +
+          `</p:cTn>` +
+        `</p:par>` +
+      `</p:tnLst>` +
+    `</p:timing>`
+  );
+}
+
 export async function generatePptx(
   pdfBlob: Blob,
   timings: SlideTimings,
@@ -73,11 +112,20 @@ export async function generatePptx(
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
     const isLastSlide = i === slideFiles.length - 1;
-    const finalDurationMs = isLastSlide ? durationMs + 2000 : durationMs;
-    const effectXML = '<p:fade/>'; // 全部都有淡化特效
+    const effectXML = '<p:fade/>';
+    const transitionBlock = isLastSlide
+      ? `<p:transition spd="med">${effectXML}</p:transition>`
+      : `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition>`;
 
-    // 所有投影片都保留自動換頁時間；最後一頁額外多等 2 秒再結束
-    xml = xml.replace('</p:sld>', `<p:transition spd="med" advClick="1" advTm="${finalDurationMs}">${effectXML}</p:transition></p:sld>`);
+    let timingBlock = '';
+    if (i === 0 && audioBlob && !xml.includes('<p:timing')) {
+      const shapeId = extractEmbeddedMediaShapeId(xml);
+      if (shapeId) {
+        timingBlock = buildEmbeddedAudioTimingXml(shapeId, slideFiles.length);
+      }
+    }
+
+    xml = xml.replace('</p:sld>', `${transitionBlock}${timingBlock}</p:sld>`);
     zip.file(slideFiles[i], xml);
   }
 

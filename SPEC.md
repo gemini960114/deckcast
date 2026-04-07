@@ -14,6 +14,7 @@
 2. **Podcast / Music 對齊正式拆為雙階段**：`4.1 / 7.1` 固定負責多模態音訊理解與字幕修正；`4.2 / 7.2` 固定負責 `script/lyrics + SRT` 的文字對齊與 `startSrtId` 推斷。
 3. **導入本地 OpenAI-compatible LLM**：純文字推理步驟可改接本地 `gemma-4-31B-it`，由 `lib/llm.ts` 統一處理 Gemini 與 OpenAI-compatible provider 分流。
 4. **Markdown code fence 保留正文**：`stripMarkdown()` 不再把 fenced code block 內文整段刪除，只移除外層 ``` 包裝，避免本地模型輸出被誤清空。
+5. **PPTX 音訊 timing XML 補寫**：`generatePptx()` 目前不只嵌入第一頁音訊，還會補寫 `<p:timing>`、`numSld` 與 `spTgt`，讓 PowerPoint 更接近自動播放與跨頁持續播放的行為。
 
 ---
 
@@ -188,7 +189,7 @@ const ai = new GoogleGenAI({ apiKey: 'YOUR_KEY' });
 
 ```
 Step 1 / 4.1 / 7.1     → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash
-Step 2 / 4.2 / 5 / 7.2 → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash / gemma-4-31B-it
+Step 2 / 4.2 / 5 / 7.2 → 預設為 gemini-3-flash-preview；當 LOCAL_LLM_* 已完整設定時，會額外出現 Gemma 4，並自動成為預設（實際模型名稱 gemma-4-31B-it）
 Step 3                 → gemini-2.5-pro-preview-tts / gemini-2.5-flash-preview-tts（預設）
 Step 6                 → lyria-3-pro-preview（預設）
 Whisper（若啟用）      → whisper-Breeze-ASR-25
@@ -332,6 +333,7 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
 LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
 LOCAL_LLM_MODEL=gemma-4-31B-it
+LOCAL_LLM_LABEL=Gemma 4
 ```
 
 規則如下：
@@ -339,6 +341,7 @@ LOCAL_LLM_MODEL=gemma-4-31B-it
 - 若 `LOCAL_LLM_BASE_URL` 只填到 `/v1`，程式會自動補上 `/chat/completions`。
 - `generateText()` 會先判斷模型是否為 Gemini；若不是，則改走 OpenAI-compatible 路徑。
 - 若設定了 `LOCAL_LLM_MODEL`，本地路徑實際送出的 `model` 會優先使用此值。
+- `LOCAL_LLM_LABEL` 只影響 UI 顯示名稱，方便將同一個模型 id 包裝成較友善的名稱，例如 `Gemma 4`、`Qwen 32B`。
 
 ---
 
@@ -351,7 +354,7 @@ export const SESSION_KEY    = 'gemini_key';
 
 export const TEXT_MODEL_OPTIONS = [
   { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
-  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview（預設）' },
+  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview' },
   { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
 ] as const;
 
@@ -1570,7 +1573,7 @@ Step 7：/api/align-music
 
 - Podcast 音訊為 WAV（未壓縮），檔案較大（~10-20MB）
 - 歷史紀錄含所有 Blob，多筆後 IndexedDB 佔用空間可觀（每筆 30-50MB）
-- PPTX 嵌入音訊後無法自動設定「跨投影片播放」，需使用者手動勾選
+- PPTX 已補寫 timing XML 以提高自動播放與跨投影片播放相容性，但不同版本的 PowerPoint 仍可能有差異
 - CDN 載入 pdfjs 需要網路連線（首次 PPTX 生成時約 1MB 下載）
 - TTS 多人語音使用 `gemini-2.5-flash-preview-tts`，預覽模型可能有 quota 限制
 

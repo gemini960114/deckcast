@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGeminiAI, unauthorizedResponse } from '@/lib/getAI';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { DEFAULT_TEXT_MODEL, isGeminiModel, resolveTextModel } from '@/lib/constants';
+import { DEFAULT_MULTIMODAL_MODEL, isGeminiModel, resolveTextModel } from '@/lib/constants';
 import { PARSE_PDF_PROMPT } from '@/lib/prompts';
 
 export async function POST(req: NextRequest) {
@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
     const ai = getGeminiAI(req);
     const { pdf, textModel } = await req.json() as { pdf: string; textModel?: string };
     const requestedModel = resolveTextModel(textModel);
-    const modelName = isGeminiModel(requestedModel) ? requestedModel : DEFAULT_TEXT_MODEL;
+    const modelName = isGeminiModel(requestedModel) ? requestedModel : DEFAULT_MULTIMODAL_MODEL;
 
     const response = await ai.models.generateContent({
       model: modelName,

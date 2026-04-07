@@ -8,9 +8,9 @@ export const AUTH_EMAIL_KEY = 'deckcast_auth_email';
 // ===== Models =====
 export const TEXT_MODEL_OPTIONS = [
   { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
-  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview（預設）' },
+  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview' },
   { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
-  { value: 'gemma-4-31B-it', label: 'gemma-4-31B-it（本地 OpenAI-compatible）' },
+  { value: 'gemma-4-31B-it', label: 'Gemma 4' },
 ] as const;
 
 export const STEP71_MODEL_OPTIONS = [
@@ -38,6 +38,7 @@ export type TtsModelOption = typeof TTS_MODEL_OPTIONS[number]['value'];
 export type MusicModelOption = typeof MUSIC_MODEL_OPTIONS[number]['value'];
 
 export const DEFAULT_TEXT_MODEL: TextModelOption = 'gemini-3-flash-preview';
+export const DEFAULT_LOCAL_TEXT_MODEL: TextModelOption = 'gemma-4-31B-it';
 export const DEFAULT_STEP41_MODEL: Step41ModelOption = 'gemini-3-flash-preview';
 export const DEFAULT_STEP71_MODEL: Step71ModelOption = 'gemini-3-flash-preview';
 export const DEFAULT_MULTIMODAL_MODEL: Step41ModelOption = DEFAULT_STEP41_MODEL;
