@@ -314,12 +314,13 @@ docker run -p 3000:3000 --env-file .env.local -d deckcast-app
 注意：
 - 若有啟用 auth，建議不要把正式的 `.env.local` 直接 bake 進 image；較安全的做法是以 `--env-file` 或個別 `-e` 參數在 runtime 注入
 - `NEXT_PUBLIC_AUTH_ENABLED` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數，若 Docker image 是在另一個環境建置，建置時就要提供正確值
+- `NCHC_WHISPER_*` 與 `LOCAL_LLM_*` 都屬於 server-side runtime 變數；若要啟用 Whisper 或本地 OpenAI-compatible LLM，請透過 `.env.local`、`--env-file` 或個別 `-e` 參數注入容器
 
 ### 方式 2：使用 Docker Compose (推薦於私有伺服器部署)
 
 專案內已附帶設定好的 `docker-compose.yml`，包含：
 - `Dockerfile` build args：會把 `NEXT_PUBLIC_AUTH_ENABLED` 與 `NEXT_PUBLIC_GOOGLE_CLIENT_ID` 注入建置階段
-- `env_file: .env.local`：會把 server-side 的 auth 與 Whisper 設定注入容器 runtime
+- `env_file: .env.local`：會把 server-side 的 auth、Whisper 與 `LOCAL_LLM_*` 設定注入容器 runtime
 - Port 3000 綁定、healthcheck 與自動重新啟動設定
 
 這是最乾淨、最不怕主機套件衝突的啟動方式。
@@ -346,7 +347,7 @@ docker compose down
 
 正式部署建議直接使用 repo 內建的 `cloudbuild.yaml`。它現在已經會：
 - 在 Docker build 時帶入 `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID`
-- 在 Cloud Run deploy 時帶入 auth 與 Whisper 所需的 runtime env vars
+- 在 Cloud Run deploy 時帶入 auth、Whisper 與本地 OpenAI-compatible LLM 所需的 runtime env vars
 
 #### 部署步驟
 
@@ -360,15 +361,17 @@ gcloud config set project gen-lang-client-0039151647
 # 3. 提交 Cloud Build 部署
 #    ⚠️ 重要：在 PowerShell 中 --substitutions 值必須用雙引號包住，
 #    否則 PowerShell 會把逗號當陣列分隔符，導致環境變數設定錯誤。
-gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions"
+gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it"
 ```
 
 #### 補充說明
 
 - `GOOGLE_CLIENT_ID`、`INVITATION_CODE`、`SESSION_SECRET` 是 auth 啟用時必需的 server-side 參數
 - `NCHC_WHISPER_*` 會影響 Whisper 對齊能力；未設定時仍可退回非 Whisper 路徑，但精準度可能下降
+- `LOCAL_LLM_*` 為選配；只有在你要讓 `Step 2 / 4.2 / 5 / 7.2` 走本地 OpenAI-compatible 模型時才需要提供
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
+- `LOCAL_LLM_BASE_URL` 若填到 `/v1`，程式會自動補成 `/chat/completions`；若你已直接提供完整的 `/chat/completions` 端點，也可以直接使用
 - **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 
 ---
