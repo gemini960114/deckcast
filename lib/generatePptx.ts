@@ -112,10 +112,9 @@ export async function generatePptx(
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
     const isLastSlide = i === slideFiles.length - 1;
+    const finalDurationMs = isLastSlide ? durationMs + 2000 : durationMs;
     const effectXML = '<p:fade/>';
-    const transitionBlock = isLastSlide
-      ? `<p:transition spd="med">${effectXML}</p:transition>`
-      : `<p:transition spd="med" advClick="1" advTm="${durationMs}">${effectXML}</p:transition>`;
+    const transitionBlock = `<p:transition spd="med" advClick="1" advTm="${finalDurationMs}">${effectXML}</p:transition>`;
 
     let timingBlock = '';
     if (i === 0 && audioBlob && !xml.includes('<p:timing')) {
