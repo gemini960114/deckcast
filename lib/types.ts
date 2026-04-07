@@ -42,7 +42,12 @@ export interface GenerationRecord {
   pdfName: string;
   createdAt: number;
   ownerEmail?: string;
+  multimodalModel?: string;
   textModel?: string;
+  step41Model?: string;
+  step42Model?: string;
+  step71Model?: string;
+  step72Model?: string;
   ttsModel?: string;
   musicModel?: string;
   // Settings snapshot

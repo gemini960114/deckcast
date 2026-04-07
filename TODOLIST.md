@@ -19,7 +19,7 @@
 
 ## 3. 基礎模型與提示詞 (Prompts) 架構
 - [x] 定義所有支援模型：指定 `gemini-3-flash-preview`, `lyria-3-pro-preview`, 與多聲道 TTS 模型
-- [x] 將 Step 0 設定區擴充為模型下拉選單：`Step 1 / 2 / 4 / 5 / 7` 可選 `gemini-3.1-pro-preview` / `gemini-3-flash-preview` / `gemini-2.5-flash`，`Step 3` 可選 `gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`，`Step 6` 目前固定 `lyria-3-pro-preview`
+- [x] 將 Step 0 設定區重構為四組模型下拉：`Step 1 / 4.1 / 7.1` 使用多模態 Gemini、`Step 2 / 4.2 / 5 / 7.2` 可切 Gemini / `gemma-4-31B-it`、`Step 3` 為 TTS、`Step 6` 為 Lyria
 - [x] 製作「Podcast 雙人對話腳本」提示詞 (支援注入 Speaker 1、Speaker 2、風格、語氣自訂)
 - [x] 製作「雙層控制結構 (Dual-Layer Prompt)」歌詞提示詞，改為機器解析優先格式：`[段落名稱] [Slide N]`、禁止 AI 自行輸出時間軸、禁止用 `()` / `{}` 寫不可唱提示
 - [x] 新增 `normalizeTimings` 時間校正引擎，建立遇到 API 解析錯誤時的防呆數學退路
@@ -35,6 +35,7 @@
 - [x] `POST /api/align-podcast` & `/api/align-music`: 實作 2-step AI 對齊流程；Phase 1 產出/修正 SRT，Phase 2 以 `startSrtId` 對齊投影片，再由程式換算精準轉場時間
 - [x] **Whisper + Gemini 混合 ASR**：新增 `lib/whisper.ts` 與 `lib/srt.ts`，將 Whisper 逐字稿、Gemini SRT、文字修正與 fallback 整理成共用模組
 - [x] **音訊 MIME 一致性**：`align-podcast` / `align-music` 接收前端傳入的 `audioMimeType`，不再寫死 `audio/wav`
+- [x] **本地 OpenAI-compatible LLM Provider**：新增 `lib/llm.ts`，讓 `Step 2 / 4.2 / 5 / 7.2` 可切到 `gemma-4-31B-it`
 
 ## 5. 前端流程 UI 與簡報 (PPTX) 渲染
 - [x] 實作嚴謹的順序解鎖流程流：PDF -> Podcast 文稿 -> Podcast 音訊/上傳 -> Podcast 簡報 -> 歌詞 -> 音樂音訊/上傳 -> 音樂簡報
@@ -46,6 +47,7 @@
 - [x] **SRT 偏移重封裝**：新增 SRT offset 調整與重新封裝 PPTX 功能，讓對齊微調不必整條流程重跑
 - [x] **登入頁設計**：新增獨立 `LoginPage`，當 `AUTH_ENABLED=true` 時先進登入頁，再進入主工作台
 - [x] **Podcast / Music 下載命名修正**：下載檔名改為與實際 Blob MIME 一致，避免 WAV 被誤命名為 MP3
+- [x] **模型設定簡化**：前端 state 收斂為 `multimodalModel` 與 `textModel` 兩個核心模型值，再映射到 Step 4 / Step 7 的 phase 參數
 
 ## 6. 後期測試與邊界除錯
 - [x] 清理舊程式碼：刪除不需要的手動 SRT 拼裝邏輯 (`extractSlideTexts`, `formatSrtTime`)
@@ -63,3 +65,4 @@
 - [x] 修正 Podcast 生成 route 的音訊回傳型別，確保 Next.js build 通過
 - [x] 將前端選擇的模型值一路傳入各 API route，讓 Step 1 / 2 / 4 / 5 / 7、Step 3、Step 6 不再寫死模型
 - [x] 將 `README.md` / `SPEC.md` / `TODOLIST.md` 同步更新為 `3-15頁` PDF 上限與可切換模型規格
+- [x] 修正 `stripMarkdown()`，保留 fenced code block 內文、只移除 ``` 包裝，避免本地模型輸出正文被誤清空

@@ -78,7 +78,10 @@
 - 也支援上傳外部歌曲音訊（目前維持 `mp3`，20MB 以內）
 
 ### PowerPoint 簡報生成（AI 精準對齊轉場）
-- 後端採用 **Whisper + Gemini** 的兩階段流程：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
+- 後端採用 **兩階段對齊流程**：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
+- `Step 4` 與 `Step 7` 皆可拆分為：
+  - `4.1 / 7.1`：多模態理解（音訊 + 參考文本），固定使用 Gemini 系列
+  - `4.2 / 7.2`：文字對齊（script/lyrics + SRT），可使用 Gemini 或本地 `gemma-4-31B-it`
 - **歌曲對齊核心設計**：Phase 1 採「lyrics-as-anchor」策略，歌詞文字是唯一正確來源，音訊只負責定位時間。
 - **Podcast 對齊核心設計**：以實際音訊為主、腳本為輔，先修正逐段字幕文字，再對應每張投影片開始的字幕 id。
 - 若 AI 配對失敗或不足，系統仍會退回 `lyrics/script weight fallback` 或均分 fallback，避免流程中斷。
@@ -164,7 +167,8 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 ### 模型選擇
 
-- `Step 1 / 2 / 4 / 5 / 7`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
+- `Step 1 / 4.1 / 7.1`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
+- `Step 2 / 4.2 / 5 / 7.2`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` / `gemma-4-31B-it`
 - `Step 3`：`gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設）
 - `Step 6`：`lyria-3-pro-preview`（預設）
 - 這些選擇會隨專案紀錄一起存入 IndexedDB，重新載入歷史紀錄時會自動還原
@@ -180,15 +184,16 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 | 前端 | React（Next.js App Router）+ TypeScript | UI、步驟狀態、IndexedDB 讀寫、PPTX 生成、檔案下載 |
 | 前端核心套件 | `pdfjs-dist` | PDF 每頁渲染為圖片（Stage 1 壓縮預處理 + Stage 7 PPTX 頁面圖片） |
 | 前端核心套件 | `pptxgenjs` | PPTX 生成與每頁自動換頁計時設定 |
-| 後端 | Next.js API Routes | Gemini API Key 安全代理、Google OAuth/session 驗證、Whisper 串接、時間軸解析 |
-| AI 服務 | Google Gemini API + NCHC Whisper API | 文稿、歌詞、TTS、音樂生成、SRT 對齊 |
+| 後端 | Next.js API Routes | Gemini API Key 安全代理、Google OAuth/session 驗證、Whisper 串接、本地 OpenAI-compatible LLM 串接、時間軸解析 |
+| AI 服務 | Google Gemini API + NCHC Whisper API + OpenAI-compatible LLM | 文稿、歌詞、TTS、音樂生成、SRT 對齊、文字比對 |
 | 持久化 | 瀏覽器 IndexedDB | 儲存所有生成結果（文字、音訊 Blob、PPTX Blob），auth 啟用時依 Google email 隔離 |
 
 ### 使用的 AI 模型
 
 | 流程 | 可選模型 |
 |---|---|
-| Step 1 / 2 / 4 / 5 / 7 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
+| Step 1 / 4.1 / 7.1 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
+| Step 2 / 4.2 / 5 / 7.2 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` / `gemma-4-31B-it` |
 | Step 3 | `gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設） |
 | Step 6 | `lyria-3-pro-preview`（預設） |
 | Whisper 對齊（若啟用） | `whisper-Breeze-ASR-25`（可由 `NCHC_WHISPER_MODEL` 覆蓋） |
@@ -270,11 +275,17 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 NCHC_WHISPER_API_KEY=...
 NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25
 NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
+LOCAL_LLM_MODEL=gemma-4-31B-it
 ```
 
 說明：
 - `AUTH_ENABLED=false` 時，`INVITATION_CODE` / `SESSION_SECRET` / Google Client ID 可先不填
 - 若不使用 Whisper 對齊，可先不填 `NCHC_WHISPER_*`；系統會退回 Gemini-only 或 fallback 流程
+- `LOCAL_LLM_*` 為選配，供 `Step 2 / 4.2 / 5 / 7.2` 這類純文字推理步驟改接本地 OpenAI-compatible 模型
+- 若 `LOCAL_LLM_BASE_URL` 已直接填到 `/chat/completions`，程式會直接使用；若只填到 `/v1`，則會自動補上 `/chat/completions`
+- `LOCAL_LLM_MODEL` 為本地模型實際送出的模型名稱，若有設定，會優先覆蓋前端同組下拉選單的本地模型值
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---

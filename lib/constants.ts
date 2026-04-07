@@ -10,7 +10,17 @@ export const TEXT_MODEL_OPTIONS = [
   { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
   { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview（預設）' },
   { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+  { value: 'gemma-4-31B-it', label: 'gemma-4-31B-it（本地 OpenAI-compatible）' },
 ] as const;
+
+export const STEP71_MODEL_OPTIONS = [
+  { value: 'gemini-3.1-pro-preview', label: 'gemini-3.1-pro-preview' },
+  { value: 'gemini-3-flash-preview', label: 'gemini-3-flash-preview（預設）' },
+  { value: 'gemini-2.5-flash', label: 'gemini-2.5-flash' },
+] as const;
+
+export const STEP41_MODEL_OPTIONS = STEP71_MODEL_OPTIONS;
+export const MULTIMODAL_MODEL_OPTIONS = STEP41_MODEL_OPTIONS;
 
 export const TTS_MODEL_OPTIONS = [
   { value: 'gemini-2.5-pro-preview-tts', label: 'gemini-2.5-pro-preview-tts' },
@@ -22,10 +32,15 @@ export const MUSIC_MODEL_OPTIONS = [
 ] as const;
 
 export type TextModelOption = typeof TEXT_MODEL_OPTIONS[number]['value'];
+export type Step71ModelOption = typeof STEP71_MODEL_OPTIONS[number]['value'];
+export type Step41ModelOption = typeof STEP41_MODEL_OPTIONS[number]['value'];
 export type TtsModelOption = typeof TTS_MODEL_OPTIONS[number]['value'];
 export type MusicModelOption = typeof MUSIC_MODEL_OPTIONS[number]['value'];
 
 export const DEFAULT_TEXT_MODEL: TextModelOption = 'gemini-3-flash-preview';
+export const DEFAULT_STEP41_MODEL: Step41ModelOption = 'gemini-3-flash-preview';
+export const DEFAULT_STEP71_MODEL: Step71ModelOption = 'gemini-3-flash-preview';
+export const DEFAULT_MULTIMODAL_MODEL: Step41ModelOption = DEFAULT_STEP41_MODEL;
 export const DEFAULT_TTS_MODEL: TtsModelOption = 'gemini-2.5-flash-preview-tts';
 export const DEFAULT_MUSIC_MODEL: MusicModelOption = 'lyria-3-pro-preview';
 
@@ -33,6 +48,18 @@ export function resolveTextModel(model?: string): TextModelOption {
   return TEXT_MODEL_OPTIONS.some(option => option.value === model)
     ? (model as TextModelOption)
     : DEFAULT_TEXT_MODEL;
+}
+
+export function resolveStep71Model(model?: string): Step71ModelOption {
+  return STEP71_MODEL_OPTIONS.some(option => option.value === model)
+    ? (model as Step71ModelOption)
+    : DEFAULT_STEP71_MODEL;
+}
+
+export function resolveStep41Model(model?: string): Step41ModelOption {
+  return STEP41_MODEL_OPTIONS.some(option => option.value === model)
+    ? (model as Step41ModelOption)
+    : DEFAULT_STEP41_MODEL;
 }
 
 export function resolveTtsModel(model?: string): TtsModelOption {
@@ -45,6 +72,14 @@ export function resolveMusicModel(model?: string): MusicModelOption {
   return MUSIC_MODEL_OPTIONS.some(option => option.value === model)
     ? (model as MusicModelOption)
     : DEFAULT_MUSIC_MODEL;
+}
+
+export function isGeminiTextModel(model?: string): boolean {
+  return resolveTextModel(model).startsWith('gemini-');
+}
+
+export function isGeminiModel(model?: string): boolean {
+  return (model ?? '').startsWith('gemini-');
 }
 
 // ===== Default Settings =====

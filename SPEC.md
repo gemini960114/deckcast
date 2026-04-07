@@ -9,6 +9,12 @@
 4. **登入與歷史紀錄隔離**：新增 invitation code + Google OAuth 雙重驗證、`AUTH_ENABLED` 開關、HMAC session token；當 `AUTH_ENABLED=true` 時，IndexedDB 歷史紀錄會依 Google email (`ownerEmail`) 隔離。
 5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-15 張**；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
 
+### ✨ v05 補充亮點（2026-04-07）：
+1. **模型選單收斂為四組**：Step 0 目前改為 `Step 1 / 4.1 / 7.1`、`Step 2 / 4.2 / 5 / 7.2`、`Step 3`、`Step 6` 四組模型下拉，UI 與後端實際能力一致。
+2. **Podcast / Music 對齊正式拆為雙階段**：`4.1 / 7.1` 固定負責多模態音訊理解與字幕修正；`4.2 / 7.2` 固定負責 `script/lyrics + SRT` 的文字對齊與 `startSrtId` 推斷。
+3. **導入本地 OpenAI-compatible LLM**：純文字推理步驟可改接本地 `gemma-4-31B-it`，由 `lib/llm.ts` 統一處理 Gemini 與 OpenAI-compatible provider 分流。
+4. **Markdown code fence 保留正文**：`stripMarkdown()` 不再把 fenced code block 內文整段刪除，只移除外層 ``` 包裝，避免本地模型輸出被誤清空。
+
 ---
 
 ## 1. 專案概述
@@ -181,10 +187,12 @@ const ai = new GoogleGenAI({ apiKey: 'YOUR_KEY' });
 ### 8.2 模型清單
 
 ```
-Step 1 / 2 / 4 / 5 / 7 → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash
+Step 1 / 4.1 / 7.1     → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash
+Step 2 / 4.2 / 5 / 7.2 → gemini-3.1-pro-preview / gemini-3-flash-preview（預設） / gemini-2.5-flash / gemma-4-31B-it
 Step 3                 → gemini-2.5-pro-preview-tts / gemini-2.5-flash-preview-tts（預設）
 Step 6                 → lyria-3-pro-preview（預設）
 Whisper（若啟用）      → whisper-Breeze-ASR-25
+Local LLM（若啟用）    → OpenAI-compatible `/chat/completions`
 ```
 
 ### 8.3 文字生成（PDF 解析、文稿、歌詞）
@@ -313,6 +321,24 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=...apps.googleusercontent.com
 4. 回傳 `{ token, email }`
 
 登入頁由 `components/LoginPage.tsx` 提供，使用 Google Identity Services 前端按鈕，不需要 client secret。
+
+---
+
+## 9.2 本地 OpenAI-compatible LLM 設定
+
+純文字推理步驟（`Step 2 / 4.2 / 5 / 7.2`）可改接本地或私有部署的 OpenAI-compatible Chat Completions API。
+
+```env
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
+LOCAL_LLM_MODEL=gemma-4-31B-it
+```
+
+規則如下：
+- 若 `LOCAL_LLM_BASE_URL` 已是 `/chat/completions` 完整端點，程式直接使用。
+- 若 `LOCAL_LLM_BASE_URL` 只填到 `/v1`，程式會自動補上 `/chat/completions`。
+- `generateText()` 會先判斷模型是否為 Gemini；若不是，則改走 OpenAI-compatible 路徑。
+- 若設定了 `LOCAL_LLM_MODEL`，本地路徑實際送出的 `model` 會優先使用此值。
 
 ---
 
@@ -1124,6 +1150,7 @@ const [dialogueStyle, setDialogueStyle] = useState(DEFAULT_DIALOGUE_STYLE);
 const [tone, setTone] = useState(DEFAULT_TONE);
 const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
 const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
+const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
 const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
 const [ttsModel, setTtsModel] = useState<string>(DEFAULT_TTS_MODEL);
 const [musicModel, setMusicModel] = useState<string>(DEFAULT_MUSIC_MODEL);
@@ -1515,8 +1542,8 @@ Step 3：生成 Podcast 音訊
     └─ Upload 路徑：接受 mp3 / wav / m4a / aac
     ↓  updateRecord(podcastBlob + podcastSource + voice settings)
 Step 4：/api/align-podcast
-    ↓  Whisper/Gemini 產出 SRT
-    ↓  Gemini 找每頁 startSrtId
+    ↓  4.1：Whisper / Gemini 產出或修正 SRT
+    ↓  4.2：Gemini 或本地 LLM 找每頁 startSrtId
     ↓  buildSlideTimingsFromSrtIds / fallback
     ↓  generatePptx(pdf, timings, podcastBlob)
     ↓  updateRecord(podcastPptxBlob + podcastSrt + diagnostics + timings)
@@ -1527,9 +1554,9 @@ Step 6：生成歌曲音訊
     └─ Upload 路徑：接受 mp3
     ↓  updateRecord(musicBlob + musicSource)
 Step 7：/api/align-music
-    ↓  Whisper/Gemini 產出 SRT
+    ↓  7.1：Whisper / Gemini 產出或修正 SRT
     ↓  建立 slide anchor summary
-    ↓  Gemini 找每頁 startSrtId
+    ↓  7.2：Gemini 或本地 LLM 找每頁 startSrtId
     ↓  buildSlideTimingsFromSrtIds / lyrics-weight fallback
     ↓  generatePptx(pdf, timings, musicBlob)
     ↓  updateRecord(musicPptxBlob + musicSrt + diagnostics + timings)

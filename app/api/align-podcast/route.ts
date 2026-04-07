@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { resolveTextModel } from '@/lib/constants';
+import { getGeminiAI, unauthorizedResponse } from '@/lib/getAI';
+import { DEFAULT_STEP41_MODEL, isGeminiModel, resolveStep41Model, resolveTextModel } from '@/lib/constants';
 import { FIND_PODCAST_TRANSITIONS_PROMPT, GENERATE_PODCAST_SRT, REFINE_PODCAST_SRT_TEXT_PROMPT } from '@/lib/prompts';
 import { isWhisperConfigured, transcribeAudioWithWhisper } from '@/lib/whisper';
 import { parseMusicSrtJson, repairSrtEntries, srtEntriesToText } from '@/lib/srt';
 import { buildPodcastFallbackTimingsByScriptWeight, buildSlideTimingsFromSrtIds, normalizeTimings } from '@/lib/timing';
 import type { AlignPodcastDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
+import { generateText } from '@/lib/llm';
 
 export const maxDuration = 300;
 
@@ -102,7 +103,7 @@ function buildFallbackPodcastSrt(script: string): string {
 }
 
 async function generatePodcastSrtWithGemini(params: {
-  ai: ReturnType<typeof getAI>;
+  ai: ReturnType<typeof getGeminiAI>;
   audioBase64: string;
   audioMimeType: string;
   script: string;
@@ -133,17 +134,19 @@ async function generatePodcastSrtWithGemini(params: {
 
 export async function POST(req: NextRequest) {
   try {
-    const ai = getAI(req);
     // Vercel / Cloud Run 預設 NextRequest 對於 body size 在 standalone runtime 相對寬鬆，
     // 但為避免超過預設 JSON parse 上限，通常建議從前端直傳 base64 字串配合前端限流。
-    const { script, audioBase64, audioMimeType, textModel } = await req.json();
+    const { script, audioBase64, audioMimeType, textModel, step41Model, step42Model } = await req.json();
 
     if (!script || !audioBase64) {
       return NextResponse.json({ error: 'Missing script or audio data' }, { status: 400 });
     }
 
     const slideCount = extractSlideCount(script);
-    const modelName = resolveTextModel(textModel);
+    const requestedPhase2Model = resolveTextModel(step42Model ?? textModel);
+    const requestedPhase1Model = resolveStep41Model(step41Model);
+    const phase1ModelName = isGeminiModel(requestedPhase1Model) ? requestedPhase1Model : DEFAULT_STEP41_MODEL;
+    const phase2ModelName = requestedPhase2Model;
     const safeAudioMimeType = typeof audioMimeType === 'string' ? audioMimeType : 'audio/mpeg';
     const diagnostics: AlignPodcastDiagnostics = {
       phase1Success: false,
@@ -174,8 +177,9 @@ export async function POST(req: NextRequest) {
           diagnostics.phase1Success = true;
           diagnostics.srtSource = 'whisper';
           try {
+            const ai = getGeminiAI(req);
             const textRefineResponse = await ai.models.generateContent({
-              model: modelName,
+              model: phase1ModelName,
               contents: [{
                 parts: [
                   { text: REFINE_PODCAST_SRT_TEXT_PROMPT },
@@ -215,11 +219,11 @@ export async function POST(req: NextRequest) {
     if (!srtEntries.length) {
       try {
         srtEntries = await generatePodcastSrtWithGemini({
-          ai,
+          ai: getGeminiAI(req),
           audioBase64,
           audioMimeType: safeAudioMimeType,
           script,
-          textModel: modelName,
+          textModel: phase1ModelName,
         });
         totalDuration = srtEntries[srtEntries.length - 1]?.end ?? totalDuration;
         srt = srtEntriesToText(srtEntries);
@@ -247,21 +251,14 @@ export async function POST(req: NextRequest) {
     let matches: MusicTransitionMatch[] = [];
     if (slideCount > 0 && srtEntries.length) {
       try {
-        const timingResponse = await ai.models.generateContent({
-          model: modelName,
-          contents: [{
-            parts: [
-              { text: FIND_PODCAST_TRANSITIONS_PROMPT },
-              { text: `\n\n=== [資料 A] 原始文稿 ===\n${script}\n================\n` },
-              { text: `\n=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n================\n` }
-            ]
-          }],
-          config: {
-            responseMimeType: 'application/json',
-          }
+        const rawJSON = await generateText(req, {
+          model: phase2ModelName,
+          expectJson: true,
+          prompt:
+            `${FIND_PODCAST_TRANSITIONS_PROMPT}\n\n` +
+            `=== [資料 A] 原始文稿 ===\n${script}\n================\n\n` +
+            `=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n================\n`,
         });
-
-        const rawJSON = timingResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
         matches = parsePodcastTransitionMatchesJSON(rawJSON, slideCount, srtEntries);
       } catch (phase2Err) {
         diagnostics.issues.push(`Phase 2 failed: ${String(phase2Err)}`);

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { resolveTextModel } from '@/lib/constants';
+import { getGeminiAI, unauthorizedResponse } from '@/lib/getAI';
+import { DEFAULT_STEP71_MODEL, isGeminiModel, resolveStep71Model, resolveTextModel } from '@/lib/constants';
 import { FIND_TRANSITIONS_PROMPT, GENERATE_MUSIC_SRT, REFINE_MUSIC_SRT_TEXT_PROMPT } from '@/lib/prompts';
 import {
   buildFallbackSrtEntriesFromLyrics,
@@ -15,6 +15,7 @@ import {
 } from '@/lib/timing';
 import type { AlignMusicDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
 import { isWhisperConfigured, transcribeAudioWithWhisper } from '@/lib/whisper';
+import { generateText } from '@/lib/llm';
 
 export const maxDuration = 300;
 
@@ -172,7 +173,7 @@ function buildSlideAnchorSummary(lyrics: string, slideCount: number): string {
 }
 
 async function generateMusicSrtWithGemini(params: {
-  ai: ReturnType<typeof getAI>;
+  ai: ReturnType<typeof getGeminiAI>;
   audioBase64: string;
   audioMimeType: string;
   structuredLyrics: string;
@@ -203,15 +204,26 @@ async function generateMusicSrtWithGemini(params: {
 
 export async function POST(req: NextRequest) {
   try {
-    const ai = getAI(req);
-    const { lyrics, audioBase64, audioMimeType, duration, slideCount: rawSlideCount, textModel } = await req.json();
+    const {
+      lyrics,
+      audioBase64,
+      audioMimeType,
+      duration,
+      slideCount: rawSlideCount,
+      textModel,
+      step71Model,
+      step72Model,
+    } = await req.json();
 
     if (!lyrics || !audioBase64) {
       return NextResponse.json({ error: 'Missing lyrics or audio data' }, { status: 400 });
     }
 
     const totalDuration = typeof duration === 'number' && duration > 0 ? duration : 0;
-    const modelName = resolveTextModel(textModel);
+    const requestedPhase2Model = resolveTextModel(step72Model ?? textModel);
+    const requestedPhase1Model = resolveStep71Model(step71Model);
+    const phase1ModelName = isGeminiModel(requestedPhase1Model) ? requestedPhase1Model : DEFAULT_STEP71_MODEL;
+    const phase2ModelName = requestedPhase2Model;
     const structuredLyrics = buildStructuredLyrics(lyrics);
     const slideCount = typeof rawSlideCount === 'number' && rawSlideCount > 0 ? rawSlideCount : extractSlideCount(structuredLyrics);
     const diagnostics: AlignMusicDiagnostics = {
@@ -238,8 +250,9 @@ export async function POST(req: NextRequest) {
           diagnostics.srtSource = 'whisper';
 
           try {
+            const ai = getGeminiAI(req);
             const textRefineResponse = await ai.models.generateContent({
-              model: modelName,
+              model: phase1ModelName,
               contents: [{
                 parts: [
                   { text: REFINE_MUSIC_SRT_TEXT_PROMPT },
@@ -277,11 +290,11 @@ export async function POST(req: NextRequest) {
     if (!srtEntries.length) {
       try {
         srtEntries = await generateMusicSrtWithGemini({
-          ai,
+          ai: getGeminiAI(req),
           audioBase64,
           audioMimeType: safeAudioMimeType,
           structuredLyrics,
-          textModel: modelName,
+          textModel: phase1ModelName,
         });
         if (srtEntries.length) {
           diagnostics.phase1Success = true;
@@ -307,24 +320,14 @@ export async function POST(req: NextRequest) {
     let matches: MusicTransitionMatch[] = [];
     if (slideCount > 0 && srtEntries.length) {
       try {
-        const transitionResponse = await ai.models.generateContent({
-          model: modelName,
-          contents: [{
-            parts: [
-              { text: FIND_TRANSITIONS_PROMPT },
-                {
-                  text:
-                  `\n\n=== [資料 A] 投影片錨點摘要 JSON ===\n${buildSlideAnchorSummary(structuredLyrics, slideCount)}\n========================\n\n` +
-                  `=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n========================`,
-                },
-            ],
-          }],
-          config: {
-            responseMimeType: 'application/json',
-          },
+        const rawMatches = await generateText(req, {
+          model: phase2ModelName,
+          expectJson: true,
+          prompt:
+            `${FIND_TRANSITIONS_PROMPT}\n\n` +
+            `=== [資料 A] 投影片錨點摘要 JSON ===\n${buildSlideAnchorSummary(structuredLyrics, slideCount)}\n========================\n\n` +
+            `=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n========================`,
         });
-
-        const rawMatches = transitionResponse.candidates?.[0]?.content?.parts?.[0]?.text ?? '[]';
         matches = parseTransitionMatchesJSON(rawMatches, slideCount, srtEntries);
       } catch (phase2Err) {
         diagnostics.issues.push(`Phase 2 failed: ${String(phase2Err)}`);
