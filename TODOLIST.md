@@ -60,6 +60,7 @@
 - [x] **音樂對齊 Prompt 精準化**：重寫 `GENERATE_MUSIC_SRT`，明確分工「lyrics = 唯一正確文字來源，audio = 只用來定位時間」，根除 AI 自行辨識歌詞導致文字失真的問題；強化 `FIND_TRANSITIONS_PROMPT`，補充前 6–8 字定錨關鍵字、前奏/間奏邊界處理、無標記時輸出空陣列等規則；`align-music/route.ts` 加入 Phase 1 獨立 try/catch 與 Phase 2 fallback 防呆機制
 - [x] **歌曲錨點摘要重建**：`buildSlideAnchorSummary()` 改為逐行依 `[Slide N]` 聚合內容，正確支援新格式 `[Verse 1] [Slide 2]`
 - [x] **Podcast / Music 對齊鏈一致化**：兩條鏈都改為 `Whisper/Gemini -> SRT -> startSrtId -> timings -> diagnostics`，並通過 lint / build 驗證
+- [x] **Cloud Run 高承載部署檔**：新增 `cloudbuild_500.yaml`，以 `deckcast500` 作為獨立高承載服務設定，方便活動或多人同時使用
 
 ## 7. 2026-04-06 補充完成項目
 - [x] 導入 `google-auth-library`，完成後端 Google ID token 驗證

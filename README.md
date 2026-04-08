@@ -356,6 +356,14 @@ docker compose down
 - 在 Docker build 時帶入 `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID`
 - 在 Cloud Run deploy 時帶入 auth、Whisper 與本地 OpenAI-compatible LLM 所需的 runtime env vars
 
+若你要部署較高承載版本，也可以改用 [cloudbuild_500.yaml](./cloudbuild_500.yaml)。這份設定會額外指定：
+- `deckcast500` 作為獨立 Cloud Run 服務名稱
+- `CPU=4`
+- `Memory=4Gi`
+- `Concurrency=8`
+- `Min instances=3`
+- `Max instances=60`
+
 #### 部署步驟
 
 ```bash
@@ -371,6 +379,12 @@ gcloud config set project gen-lang-client-0039151647
 gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
 ```
 
+若你要部署高承載版本，改用：
+
+```bash
+gcloud builds submit --config cloudbuild_500.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
+```
+
 #### 補充說明
 
 - `GOOGLE_CLIENT_ID`、`INVITATION_CODE`、`SESSION_SECRET` 是 auth 啟用時必需的 server-side 參數
@@ -380,6 +394,7 @@ gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=tru
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
 - `LOCAL_LLM_BASE_URL` 若填到 `/v1`，程式會自動補成 `/chat/completions`；若你已直接提供完整的 `/chat/completions` 端點，也可以直接使用
+- 若部署後 Cloud Run 顯示「需要驗證」而非「公開存取」，可執行 `gcloud run services add-iam-policy-binding <service-name> --region asia-east1 --member="allUsers" --role="roles/run.invoker"` 開放匿名呼叫
 - **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 
 ---
