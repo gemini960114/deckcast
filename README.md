@@ -70,12 +70,14 @@
 - Speaker 1 / 2 各自對應不同聲音（可於設定選擇）
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
 - 下載時會保留與原始 blob 相符的副檔名
+- 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
 - 輸入歌詞（含段落標記），輸出完整歌曲
 - 輸出 `music.mp3`
 - 也支援上傳外部歌曲音訊（目前維持 `mp3`，20MB 以內）
+- 若想在外部先生成再回來上傳，可使用 [Producer.ai](https://www.producer.ai/invite/XH4T5Q)
 
 ### PowerPoint 簡報生成（AI 精準對齊轉場）
 - 後端採用 **兩階段對齊流程**：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
@@ -147,6 +149,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 - 填入自己的 Gemini API Key（BYOK — Bring Your Own Key）
 - Key 僅儲存於瀏覽器 `sessionStorage`，關閉分頁後自動清除
 - 不會傳送至伺服器儲存
+- 可從 [Google AI Studio API Keys](https://aistudio.google.com/api-keys) 取得
 
 ### Podcast 文稿變數
 

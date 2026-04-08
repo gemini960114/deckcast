@@ -983,6 +983,17 @@ export default function Home() {
             {apiKey
               ? <p className={`text-[11px] mt-1.5 font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ API Key 已設定</p>
               : <p className={`text-[11px] mt-1.5 ${t.faint}`}>僅儲存於 sessionStorage，關閉分頁後自動清除</p>}
+            <p className={`text-[11px] mt-1.5 ${t.faint}`}>
+              取得 API Key：
+              <a
+                href="https://aistudio.google.com/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className={`ml-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+              >
+                Google AI Studio
+              </a>
+            </p>
           </div>
 
           {/* Speakers + style fields — wider grid */}
@@ -1149,7 +1160,21 @@ export default function Home() {
             {step3State.status === 'loading'
               ? <LoadingBar message={podcastInputMode === 'api' ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
-                <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
+                <div className="space-y-3">
+                  <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    也可至
+                    <a
+                      href="https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`mx-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+                    >
+                      Google AI Studio Speech
+                    </a>
+                    自行生成 Podcast 音訊，完成後再回來上傳。
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className={`text-[11px] leading-relaxed ${t.faint}`}>
@@ -1273,7 +1298,21 @@ export default function Home() {
             {step6State.status === 'loading'
               ? <LoadingBar message={musicInputMode === 'api' ? '正在生成 AI 歌曲（約 30–60 秒）...' : '正在匯入 mp3 音樂檔案...'} dark={dark} />
               : musicInputMode === 'api' ? (
-                <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' && musicInputMode === 'api' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>
+                <div className="space-y-3">
+                  <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' && musicInputMode === 'api' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    也可至
+                    <a
+                      href="https://www.producer.ai/invite/XH4T5Q"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`mx-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+                    >
+                      Producer.ai
+                    </a>
+                    自行生成歌曲音訊，完成後再回來上傳。
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <input
