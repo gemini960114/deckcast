@@ -14,8 +14,9 @@ import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
   DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE,
   DEFAULT_VOICE1, DEFAULT_VOICE2, DEFAULT_STYLE_ID, DEFAULT_LYRICS_DURATION,
-  DEFAULT_TEXT_MODEL, DEFAULT_TTS_MODEL, DEFAULT_MUSIC_MODEL,
-  TEXT_MODEL_OPTIONS, TTS_MODEL_OPTIONS, MUSIC_MODEL_OPTIONS,
+  DEFAULT_TEXT_MODEL, DEFAULT_LOCAL_TEXT_MODEL, DEFAULT_MULTIMODAL_MODEL, DEFAULT_TTS_MODEL, DEFAULT_MUSIC_MODEL,
+  TEXT_MODEL_OPTIONS, MULTIMODAL_MODEL_OPTIONS, TTS_MODEL_OPTIONS, MUSIC_MODEL_OPTIONS,
+  resolveTextModelId, resolveStep41ModelId,
   LYRICS_DURATIONS, voiceSampleUrl,
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
 } from '@/lib/constants';
@@ -253,7 +254,10 @@ export default function Home() {
   const [tone, setTone] = useState(DEFAULT_TONE);
   const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
+  const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
+  const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
+  const [localLlmLabel, setLocalLlmLabel] = useState('Gemma 4');
   const [ttsModel, setTtsModel] = useState<string>(DEFAULT_TTS_MODEL);
   const [musicModel, setMusicModel] = useState<string>(DEFAULT_MUSIC_MODEL);
   const [styleId, setStyleId] = useState(DEFAULT_STYLE_ID);
@@ -303,6 +307,11 @@ export default function Home() {
 
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
+  const textModelOptions = localLlmEnabled
+    ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
+      ? { ...option, label: localLlmLabel }
+      : option)
+    : TEXT_MODEL_OPTIONS.filter(option => option.id !== DEFAULT_LOCAL_TEXT_MODEL);
 
   useEffect(() => {
     const saved = sessionStorage.getItem(SESSION_KEY);
@@ -332,6 +341,29 @@ export default function Home() {
 
     setAuthReady(true);
   }, [authEnabled]);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch('/api/runtime-config', { cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string };
+        const enabled = Boolean(data.localLlmEnabled);
+        const label = data.localLlmLabel?.trim() || 'Gemma 4';
+        setLocalLlmEnabled(enabled);
+        setLocalLlmLabel(label);
+        setTextModel(prev => !enabled && resolveTextModelId(prev) === DEFAULT_LOCAL_TEXT_MODEL
+          ? DEFAULT_TEXT_MODEL
+          : resolveTextModelId(prev));
+        setMultimodalModel(prev => resolveStep41ModelId(prev));
+      } catch {
+        setLocalLlmEnabled(false);
+        setLocalLlmLabel('Gemma 4');
+        setTextModel(prev => resolveTextModelId(prev) === DEFAULT_LOCAL_TEXT_MODEL ? DEFAULT_TEXT_MODEL : resolveTextModelId(prev));
+        setMultimodalModel(prev => resolveStep41ModelId(prev));
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (!authReady) return;
@@ -453,7 +485,7 @@ export default function Home() {
       }
 
       const pdfBase64 = await blobToBase64(file);
-      const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64, textModel });
+      const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64, multimodalModel });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setSlides(data.slides); setStep1State({ status: 'done' });
@@ -469,7 +501,12 @@ export default function Home() {
         tone,
         voice1,
         voice2,
+        multimodalModel,
         textModel,
+        step41Model: multimodalModel,
+        step42Model: textModel,
+        step71Model: multimodalModel,
+        step72Model: textModel,
         ttsModel,
         musicModel,
         styleId,
@@ -594,6 +631,8 @@ export default function Home() {
         audioBase64,
         audioMimeType: podcastBlob.type || 'audio/mpeg',
         textModel,
+        step41Model: multimodalModel,
+        step42Model: textModel,
       });
       let timings;
       let srt = '';
@@ -612,7 +651,18 @@ export default function Home() {
       setPodcastPptxBlob(pptx); setPodcastSrt(srt); setStep4State({ status: 'done' });
       setPodcastDiagnostics(diagnostics);
       setPodcastTimings(timings);
-      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx, podcastSrt: srt, podcastDiagnostics: diagnostics ?? undefined, podcastTimings: timings, textModel }, normalizedOwnerEmail);
+      if (recordId) {
+        await updateRecord(recordId, {
+          podcastPptxBlob: pptx,
+          podcastSrt: srt,
+          podcastDiagnostics: diagnostics ?? undefined,
+          podcastTimings: timings,
+          multimodalModel,
+          textModel,
+          step41Model: multimodalModel,
+          step42Model: textModel,
+        }, normalizedOwnerEmail);
+      }
       setToast('Podcast 簡報已生成！'); loadHistory();
       setTimeout(() => step5Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
@@ -698,6 +748,8 @@ export default function Home() {
         duration,
         slideCount,
         textModel,
+        step71Model: multimodalModel,
+        step72Model: textModel,
       });
       let timings;
       let srt = '';
@@ -718,7 +770,18 @@ export default function Home() {
       setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
       setMusicDiagnostics(diagnostics);
       setMusicTimings(timings);
-      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx, musicSrt: srt, musicDiagnostics: diagnostics ?? undefined, musicTimings: timings, textModel }, normalizedOwnerEmail);
+      if (recordId) {
+        await updateRecord(recordId, {
+          musicPptxBlob: pptx,
+          musicSrt: srt,
+          musicDiagnostics: diagnostics ?? undefined,
+          musicTimings: timings,
+          multimodalModel,
+          textModel,
+          step71Model: multimodalModel,
+          step72Model: textModel,
+        }, normalizedOwnerEmail);
+      }
       setToast('音樂簡報已生成！'); loadHistory();
     } catch (e) {
       setStep7State({ status: 'error', error: String(e) }); setToast('音樂簡報生成失敗：' + String(e));
@@ -729,7 +792,15 @@ export default function Home() {
     if (rec.speaker1) setSpeaker1(rec.speaker1); if (rec.speaker2) setSpeaker2(rec.speaker2);
     if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); if (rec.tone) setTone(rec.tone);
     if (rec.voice1) setVoice1(rec.voice1); if (rec.voice2) setVoice2(rec.voice2);
-    if (rec.textModel) setTextModel(rec.textModel);
+    if (rec.multimodalModel) setMultimodalModel(resolveStep41ModelId(rec.multimodalModel));
+    else if (rec.step41Model) setMultimodalModel(resolveStep41ModelId(rec.step41Model));
+    else if (rec.step71Model) setMultimodalModel(resolveStep41ModelId(rec.step71Model));
+    else setMultimodalModel(DEFAULT_MULTIMODAL_MODEL);
+    const savedTextModel = rec.textModel ?? rec.step42Model ?? rec.step72Model;
+    const normalizedTextModel = savedTextModel ? resolveTextModelId(savedTextModel) : null;
+    if (normalizedTextModel === DEFAULT_LOCAL_TEXT_MODEL && !localLlmEnabled) setTextModel(DEFAULT_TEXT_MODEL);
+    else if (normalizedTextModel) setTextModel(normalizedTextModel);
+    else setTextModel(DEFAULT_TEXT_MODEL);
     if (rec.ttsModel) setTtsModel(rec.ttsModel);
     if (rec.musicModel) setMusicModel(rec.musicModel);
     if (rec.styleId) setStyleId(rec.styleId); if (rec.lyricsDuration) setLyricsDuration(rec.lyricsDuration);
@@ -912,6 +983,17 @@ export default function Home() {
             {apiKey
               ? <p className={`text-[11px] mt-1.5 font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ API Key 已設定</p>
               : <p className={`text-[11px] mt-1.5 ${t.faint}`}>僅儲存於 sessionStorage，關閉分頁後自動清除</p>}
+            <p className={`text-[11px] mt-1.5 ${t.faint}`}>
+              取得 API Key：
+              <a
+                href="https://aistudio.google.com/api-keys"
+                target="_blank"
+                rel="noreferrer"
+                className={`ml-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+              >
+                Google AI Studio
+              </a>
+            </p>
           </div>
 
           {/* Speakers + style fields — wider grid */}
@@ -965,10 +1047,16 @@ export default function Home() {
 
           <div className="grid grid-cols-1 gap-3 mt-4">
             <div>
-              <label className={labelCls}>Step 1 / 2 / 4 / 5 / 7 模型</label>
-              <select value={textModel} onChange={e => setTextModel(e.target.value)} className={selectCls}>
-                {TEXT_MODEL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              <label className={labelCls}>Step 1 / 4.1 / 7.1 模型</label>
+              <select value={multimodalModel} onChange={e => setMultimodalModel(e.target.value)} className={selectCls}>
+                {MULTIMODAL_MODEL_OPTIONS.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
               </select>
+            </div>
+            <div>
+              <label className={labelCls}>Step 2 / 4.2 / 5 / 7.2 模型</label>
+              <select value={textModel} onChange={e => setTextModel(e.target.value)} className={selectCls}>
+                  {textModelOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+                </select>
             </div>
             <div>
               <label className={labelCls}>Step 3 模型</label>
@@ -983,6 +1071,9 @@ export default function Home() {
               </select>
             </div>
           </div>
+          <p className={`mt-3 text-[11px] leading-relaxed ${t.faint}`}>
+            第一組用於 PDF 與 audio 這類多模態理解；第二組用於純文字推理與對齊。只有在已設定 `LOCAL_LLM_*` 時，第二組才會出現 <span className="font-semibold">{localLlmLabel}</span>。
+          </p>
         </div>
 
         {/* ── Step 1: Upload PDF ── */}
@@ -1069,7 +1160,21 @@ export default function Home() {
             {step3State.status === 'loading'
               ? <LoadingBar message={podcastInputMode === 'api' ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
-                <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
+                <div className="space-y-3">
+                  <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    也可至
+                    <a
+                      href="https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`mx-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+                    >
+                      Google AI Studio Speech
+                    </a>
+                    自行生成 Podcast 音訊，完成後再回來上傳。
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <p className={`text-[11px] leading-relaxed ${t.faint}`}>
@@ -1193,7 +1298,21 @@ export default function Home() {
             {step6State.status === 'loading'
               ? <LoadingBar message={musicInputMode === 'api' ? '正在生成 AI 歌曲（約 30–60 秒）...' : '正在匯入 mp3 音樂檔案...'} dark={dark} />
               : musicInputMode === 'api' ? (
-                <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' && musicInputMode === 'api' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>
+                <div className="space-y-3">
+                  <ActionBtn onClick={handleGenerateMusic}>{step6State.status === 'done' && musicInputMode === 'api' ? '重新生成歌曲' : '生成歌曲音訊'}</ActionBtn>
+                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
+                    也可至
+                    <a
+                      href="https://www.producer.ai/invite/XH4T5Q"
+                      target="_blank"
+                      rel="noreferrer"
+                      className={`mx-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+                    >
+                      Producer.ai
+                    </a>
+                    自行生成歌曲音訊，完成後再回來上傳。
+                  </p>
+                </div>
               ) : (
                 <div className="space-y-3">
                   <input

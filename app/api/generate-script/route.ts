@@ -1,23 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { buildPodcastPrompt } from '@/lib/prompts';
 import { stripMarkdown } from '@/lib/stripMarkdown';
-import { resolveTextModel } from '@/lib/constants';
+import { unauthorizedResponse } from '@/lib/getAI';
+import { generateText } from '@/lib/llm';
 
 export async function POST(req: NextRequest) {
   try {
-    const ai = getAI(req);
     const { slides, speaker1, speaker2, dialogueStyle, tone, textModel } = await req.json();
-    const modelName = resolveTextModel(textModel);
     const prompt = buildPodcastPrompt({ speaker1, speaker2, dialogueStyle, tone });
 
-    const response = await ai.models.generateContent({
-      model: modelName,
-      contents: [{ parts: [{ text: `${prompt}\n\n${slides}` }] }],
+    const raw = await generateText(req, {
+      model: textModel,
+      prompt: `${prompt}\n\n${slides}`,
     });
-
-    const raw = response.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     const script = stripMarkdown(raw);
+    if (!script.trim()) {
+      return NextResponse.json({ error: '模型未回傳任何 Podcast 文稿內容。' }, { status: 502 });
+    }
     return NextResponse.json({ script });
   } catch (err: unknown) {
     if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {

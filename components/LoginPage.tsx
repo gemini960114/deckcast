@@ -140,7 +140,7 @@ export default function LoginPage({ dark, onToggleTheme, onLogin }: LoginPagePro
                 <p className="text-xs font-bold uppercase tracking-[0.26em] text-emerald-500">Workspace Login</p>
                 <h2 className="text-2xl font-extrabold" style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>登入 DeckCast</h2>
                 <p className={`text-sm leading-6 ${dark ? 'text-slate-400' : 'text-slate-600'}`}>
-                  邀請碼通過後才會啟用 Google 登入按鈕。這樣可以把驗證順序鎖定得更穩定。
+                  Invitation code: <span className="font-semibold text-emerald-500">ai4all</span>
                 </p>
               </div>
 

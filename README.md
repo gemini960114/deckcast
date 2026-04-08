@@ -70,27 +70,33 @@
 - Speaker 1 / 2 各自對應不同聲音（可於設定選擇）
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
 - 下載時會保留與原始 blob 相符的副檔名
+- 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
 - 輸入歌詞（含段落標記），輸出完整歌曲
 - 輸出 `music.mp3`
 - 也支援上傳外部歌曲音訊（目前維持 `mp3`，20MB 以內）
+- 若想在外部先生成再回來上傳，可使用 [Producer.ai](https://www.producer.ai/invite/XH4T5Q)
 
 ### PowerPoint 簡報生成（AI 精準對齊轉場）
-- 後端採用 **Whisper + Gemini** 的兩階段流程：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
+- 後端採用 **兩階段對齊流程**：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
+- `Step 4` 與 `Step 7` 皆可拆分為：
+  - `4.1 / 7.1`：多模態理解（音訊 + 參考文本），固定使用 Gemini 系列
+  - `4.2 / 7.2`：文字對齊（script/lyrics + SRT），可使用 Gemini 或本地 `gemma-4-31B-it`
 - **歌曲對齊核心設計**：Phase 1 採「lyrics-as-anchor」策略，歌詞文字是唯一正確來源，音訊只負責定位時間。
 - **Podcast 對齊核心設計**：以實際音訊為主、腳本為輔，先修正逐段字幕文字，再對應每張投影片開始的字幕 id。
 - 若 AI 配對失敗或不足，系統仍會退回 `lyrics/script weight fallback` 或均分 fallback，避免流程中斷。
 - PDF 每頁透過 Canvas 渲染為圖片，注入 XML 轉場效果 `<p:fade/>` 產生淡入特效。
-- 最後一張投影片不再是 0 秒，而是使用原本應有時長後再額外多等 2 秒作為收尾。
+- 第一頁嵌入的音訊物件會額外補寫 `<p:timing>`，讓 PowerPoint 更接近「開場自動播放 + 跨頁持續播放」的行為。
+- 最後一頁仍會保留 `advTm`，並在原本時長後額外多等 2 秒再跳向不存在的下一頁，方便後續輸出為影片時保留結尾停留時間。
 
 | 檔案 | 換頁時間計算方式 |
 |---|---|
-| `podcast_slides.pptx` | 依據對齊後 SRT 與 `startSrtId` 推算換頁時間 |
-| `music_slides.pptx` | 依據歌詞錨點、對齊後 SRT 與 `startSrtId` 推算換頁時間 |
+| `podcast_slides.pptx` | 依據對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
+| `music_slides.pptx` | 依據歌詞錨點、對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
 
-> 目前音訊會嵌入 PPTX 第一頁，但 PowerPoint 的跨投影片自動播放行為仍可能需要手動調整。保守使用方式仍是下載後將音訊與簡報同時啟動。
+> 目前程式已補寫 PowerPoint timing XML，實務上更接近「第一頁自動播放、跨頁持續播放」。但不同版本的 PowerPoint 相容性仍可能有差異；若播放行為不如預期，保守做法仍是下載後將音訊與簡報同時啟動。
 
 ---
 
@@ -143,6 +149,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 - 填入自己的 Gemini API Key（BYOK — Bring Your Own Key）
 - Key 僅儲存於瀏覽器 `sessionStorage`，關閉分頁後自動清除
 - 不會傳送至伺服器儲存
+- 可從 [Google AI Studio API Keys](https://aistudio.google.com/api-keys) 取得
 
 ### Podcast 文稿變數
 
@@ -164,7 +171,8 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 ### 模型選擇
 
-- `Step 1 / 2 / 4 / 5 / 7`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
+- `Step 1 / 4.1 / 7.1`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
+- `Step 2 / 4.2 / 5 / 7.2`：目前以 provider-aware 方式區分模型，預設為 `Gemma 4 31B (Custom)`；同時可選 `Gemma 4 26B (Google)`、`Gemma 4 31B (Google)` 與 Gemini 系列
 - `Step 3`：`gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設）
 - `Step 6`：`lyria-3-pro-preview`（預設）
 - 這些選擇會隨專案紀錄一起存入 IndexedDB，重新載入歷史紀錄時會自動還原
@@ -180,15 +188,16 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 | 前端 | React（Next.js App Router）+ TypeScript | UI、步驟狀態、IndexedDB 讀寫、PPTX 生成、檔案下載 |
 | 前端核心套件 | `pdfjs-dist` | PDF 每頁渲染為圖片（Stage 1 壓縮預處理 + Stage 7 PPTX 頁面圖片） |
 | 前端核心套件 | `pptxgenjs` | PPTX 生成與每頁自動換頁計時設定 |
-| 後端 | Next.js API Routes | Gemini API Key 安全代理、Google OAuth/session 驗證、Whisper 串接、時間軸解析 |
-| AI 服務 | Google Gemini API + NCHC Whisper API | 文稿、歌詞、TTS、音樂生成、SRT 對齊 |
+| 後端 | Next.js API Routes | Gemini API Key 安全代理、Google OAuth/session 驗證、Whisper 串接、本地 OpenAI-compatible LLM 串接、時間軸解析 |
+| AI 服務 | Google Gemini API + NCHC Whisper API + OpenAI-compatible LLM | 文稿、歌詞、TTS、音樂生成、SRT 對齊、文字比對 |
 | 持久化 | 瀏覽器 IndexedDB | 儲存所有生成結果（文字、音訊 Blob、PPTX Blob），auth 啟用時依 Google email 隔離 |
 
 ### 使用的 AI 模型
 
 | 流程 | 可選模型 |
 |---|---|
-| Step 1 / 2 / 4 / 5 / 7 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
+| Step 1 / 4.1 / 7.1 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
+| Step 2 / 4.2 / 5 / 7.2 | `Gemini 3.1 Pro` / `Gemini 3 Flash` / `Gemini 2.5 Flash` / `Gemma 4 26B (Google)` / `Gemma 4 31B (Google)` / `Gemma 4 31B (Custom, 預設)` |
 | Step 3 | `gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設） |
 | Step 6 | `lyria-3-pro-preview`（預設） |
 | Whisper 對齊（若啟用） | `whisper-Breeze-ASR-25`（可由 `NCHC_WHISPER_MODEL` 覆蓋） |
@@ -270,11 +279,20 @@ NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 NCHC_WHISPER_API_KEY=...
 NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25
 NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions
+LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
+LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
+LOCAL_LLM_MODEL=gemma-4-31B-it
+LOCAL_LLM_LABEL=Gemma 4 31B (Custom)
 ```
 
 說明：
 - `AUTH_ENABLED=false` 時，`INVITATION_CODE` / `SESSION_SECRET` / Google Client ID 可先不填
 - 若不使用 Whisper 對齊，可先不填 `NCHC_WHISPER_*`；系統會退回 Gemini-only 或 fallback 流程
+- `LOCAL_LLM_*` 為選配，供 `Step 2 / 4.2 / 5 / 7.2` 這類純文字推理步驟改接本地 OpenAI-compatible 模型
+- 只有在 `LOCAL_LLM_BASE_URL` 與 `LOCAL_LLM_API_KEY` 都存在時，設定區第二組模型下拉才會顯示本地模型選項
+- 若 `LOCAL_LLM_BASE_URL` 已直接填到 `/chat/completions`，程式會直接使用；若只填到 `/v1`，則會自動補上 `/chat/completions`
+- `LOCAL_LLM_MODEL` 為本地模型實際送出的模型名稱，若有設定，會優先覆蓋前端同組下拉選單的本地模型值
+- `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4 31B (Custom)`
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---
@@ -303,12 +321,13 @@ docker run -p 3000:3000 --env-file .env.local -d deckcast-app
 注意：
 - 若有啟用 auth，建議不要把正式的 `.env.local` 直接 bake 進 image；較安全的做法是以 `--env-file` 或個別 `-e` 參數在 runtime 注入
 - `NEXT_PUBLIC_AUTH_ENABLED` / `NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數，若 Docker image 是在另一個環境建置，建置時就要提供正確值
+- `NCHC_WHISPER_*` 與 `LOCAL_LLM_*` 都屬於 server-side runtime 變數；若要啟用 Whisper 或本地 OpenAI-compatible LLM，請透過 `.env.local`、`--env-file` 或個別 `-e` 參數注入容器
 
 ### 方式 2：使用 Docker Compose (推薦於私有伺服器部署)
 
 專案內已附帶設定好的 `docker-compose.yml`，包含：
 - `Dockerfile` build args：會把 `NEXT_PUBLIC_AUTH_ENABLED` 與 `NEXT_PUBLIC_GOOGLE_CLIENT_ID` 注入建置階段
-- `env_file: .env.local`：會把 server-side 的 auth 與 Whisper 設定注入容器 runtime
+- `env_file: .env.local`：會把 server-side 的 auth、Whisper 與 `LOCAL_LLM_*` 設定注入容器 runtime
 - Port 3000 綁定、healthcheck 與自動重新啟動設定
 
 這是最乾淨、最不怕主機套件衝突的啟動方式。
@@ -335,7 +354,15 @@ docker compose down
 
 正式部署建議直接使用 repo 內建的 `cloudbuild.yaml`。它現在已經會：
 - 在 Docker build 時帶入 `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID`
-- 在 Cloud Run deploy 時帶入 auth 與 Whisper 所需的 runtime env vars
+- 在 Cloud Run deploy 時帶入 auth、Whisper 與本地 OpenAI-compatible LLM 所需的 runtime env vars
+
+若你要部署較高承載版本，也可以改用 [cloudbuild_500.yaml](./cloudbuild_500.yaml)。這份設定會額外指定：
+- `deckcast500` 作為獨立 Cloud Run 服務名稱
+- `CPU=4`
+- `Memory=4Gi`
+- `Concurrency=8`
+- `Min instances=3`
+- `Max instances=60`
 
 #### 部署步驟
 
@@ -349,15 +376,25 @@ gcloud config set project gen-lang-client-0039151647
 # 3. 提交 Cloud Build 部署
 #    ⚠️ 重要：在 PowerShell 中 --substitutions 值必須用雙引號包住，
 #    否則 PowerShell 會把逗號當陣列分隔符，導致環境變數設定錯誤。
-gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions"
+gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
+```
+
+若你要部署高承載版本，改用：
+
+```bash
+gcloud builds submit --config cloudbuild_500.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
 ```
 
 #### 補充說明
 
 - `GOOGLE_CLIENT_ID`、`INVITATION_CODE`、`SESSION_SECRET` 是 auth 啟用時必需的 server-side 參數
 - `NCHC_WHISPER_*` 會影響 Whisper 對齊能力；未設定時仍可退回非 Whisper 路徑，但精準度可能下降
+- `LOCAL_LLM_*` 為選配；只有在你要讓 `Step 2 / 4.2 / 5 / 7.2` 走本地 OpenAI-compatible 模型時才需要提供
+- `LOCAL_LLM_LABEL` 可自訂 Cloud Run 畫面顯示名稱；例如 `Gemma 4`、`Qwen 32B`
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
+- `LOCAL_LLM_BASE_URL` 若填到 `/v1`，程式會自動補成 `/chat/completions`；若你已直接提供完整的 `/chat/completions` 端點，也可以直接使用
+- 若部署後 Cloud Run 顯示「需要驗證」而非「公開存取」，可執行 `gcloud run services add-iam-policy-binding <service-name> --region asia-east1 --member="allUsers" --role="roles/run.invoker"` 開放匿名呼叫
 - **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 
 ---
