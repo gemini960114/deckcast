@@ -77,6 +77,9 @@ export interface GenerationRecord {
   musicDiagnostics?: AlignMusicDiagnostics;
   podcastTimings?: SlideTiming[];
   musicTimings?: SlideTiming[];
+  // Step 4.1 / 7.1 — optional video export
+  podcastVideoBlob?: Blob;
+  musicVideoBlob?: Blob;
 }
 
 export interface StepState {

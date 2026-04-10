@@ -179,7 +179,7 @@ export const PODCAST_PROMPT_TEMPLATE = (vars: {
   tone: string;
 }) =>
   `我想製作一個 podcast 節目，介紹以下每一張投影片內容。
-每張投影片請產出約 30 秒至 40 秒的對話腳本。
+每張投影片請產出約 30 秒至 60 秒的對話腳本，並依照內容複雜度自然調整長度。
 
 設定如下：
 - 主持人1 (Speaker 1) 的人設：${vars.speaker1}

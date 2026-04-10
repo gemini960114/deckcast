@@ -5,5 +5,6 @@ export async function GET() {
   return NextResponse.json({
     localLlmEnabled: isLocalLlmConfigured(),
     localLlmLabel: getLocalLlmLabel(),
+    videoExportEnabled: process.env.VIDEO_EXPORT_ENABLED === 'true',
   });
 }

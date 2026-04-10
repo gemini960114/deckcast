@@ -1,4 +1,5 @@
 import type { SlideTimings } from './types';
+import { pdfToJpegBase64 } from './pdfToImages';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -53,15 +54,12 @@ export async function generatePptx(
   timings: SlideTimings,
   audioBlob?: Blob
 ): Promise<Blob> {
-  // @ts-expect-error: Next.js/TypeScript cannot resolve https imports at build time
-  const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.worker.min.mjs';
+  // Render all PDF pages to JPEG base64 (CDN PDF.js, scale=2, quality=0.85)
+  const images = await pdfToJpegBase64(pdfBlob);
 
   const PptxGenJS = (await import('pptxgenjs')).default;
   const JSZip = (await import('jszip')).default;
 
-  const arrayBuffer = await pdfBlob.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
 
@@ -69,21 +67,12 @@ export async function generatePptx(
   const audioMime = audioBlob?.type || 'audio/wav';
   const audioExtn = audioMime.includes('mpeg') || audioMime.includes('mp3') ? 'mp3' : 'wav';
 
-  for (let i = 1; i <= pdf.numPages; i++) {
-    const page = await pdf.getPage(i);
-    const viewport = page.getViewport({ scale: 2 });
-    const canvas = document.createElement('canvas');
-    canvas.width = viewport.width;
-    canvas.height = viewport.height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) throw new Error('Canvas context not available');
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const imgBase64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-
+  for (let i = 0; i < images.length; i++) {
+    const imgBase64 = images[i];
     const slide = pptx.addSlide();
     slide.addImage({ data: `image/jpeg;base64,${imgBase64}`, x: 0, y: 0, w: '100%', h: '100%' });
 
-    if (i === 1 && audioBase64) {
+    if (i === 0 && audioBase64) {
       slide.addMedia({
         type: 'audio',
         extn: audioExtn,

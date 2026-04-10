@@ -70,3 +70,32 @@
 - [x] 將前端選擇的模型值一路傳入各 API route，讓 Step 1 / 2 / 4 / 5 / 7、Step 3、Step 6 不再寫死模型
 - [x] 將 `README.md` / `SPEC.md` / `TODOLIST.md` 同步更新為 `3-15頁` PDF 上限與可切換模型規格
 - [x] 修正 `stripMarkdown()`，保留 fenced code block 內文、只移除 ``` 包裝，避免本地模型輸出正文被誤清空
+
+## 8. 2026-04-10 plan_D 完成項目（VideoExportBlock + Session Cache + xfade + 修正）
+
+### 8.1 影片匯出 UI 重設計
+- [x] **新建 `components/VideoExportBlock.tsx`**：獨立卡片區塊，取代嵌入式 `VideoExportButton`；props 包含 `cachedBlob` / `onCached` 管理 session 快取
+- [x] **刪除 `components/VideoExportButton.tsx`**：已被 VideoExportBlock 完全取代
+- [x] **修改 `app/page.tsx`**：新增 `podcastVideoBlob` / `musicVideoBlob` session 快取 state；Step 4 / Step 7 下方各掛載獨立 VideoExportBlock；Download Panel 改為直接下載快取 blob，不重觸發 FFmpeg
+- [x] **快取失效時機**：重跑 Step 4 / Step 7 PPTX 生成、載入歷史紀錄、新專案，均自動清除對應 video blob
+
+### 8.2 xfade 轉場實作
+- [x] **新增 `buildXfadeArgs()`**（`lib/videoExport.ts`）：使用 FFmpeg `xfade` filter_complex 實作 fade 淡入淡出，與 PPTX `<p:fade/>` 視覺行為一致
+- [x] **重構 `buildConcatArgs()`**：原有 concat demuxer 邏輯獨立為函式，`transition=none` 或單張投影片時使用
+- [x] **xfade 時序公式**：`fadeDur[i] = clamp(0.1, 0.8, durationSec - 0.2)`；`cumOffset` 累積計算（FFmpeg offset 為絕對時間）
+
+### 8.3 Bug 修正 — xfade 影片提早結束
+- [x] **根本原因**：xfade 每個轉場消耗 `fadeDur` 秒輸出時間軸，導致影片比音訊短 `sum(fadeDurs)` 秒；加上 `-shortest` 使影片在音訊結束前截斷
+- [x] **修正方案**：預先計算 `totalFadeDuration = sum(fadeDurs)`；最後一張投影片 `-t` 延長 `totalFadeDuration + 2.0s`（+2s 對應 PPTX 最後一頁 +2000ms）；移除 `-shortest`
+
+### 8.4 Podcast 結尾問題 Prompt 工程
+- [x] **新增最後一張投影片結尾規則**（`lib/prompts.ts` `PODCAST_PROMPT_TEMPLATE`）：主持人拋出開放式問題 + 另一位給一句語境化回應，讓問題自然收尾
+- [x] **修正字面範例污染**：移除 prompt 中的字面台詞範例（每次 LLM 直接複製），改用抽象行為描述，確保每次生成不同語境的收尾
+
+### 8.5 自動重試機制
+- [x] **503 自動重試**（`VideoExportBlock.tsx`）：遇到伺服器忙碌（503）時，最多自動重試 5 次，每次等待 10 秒；UI 顯示琥珀色「⏳ 伺服器忙碌，10 秒後自動重試（第 N/5 次）…」，與一般載入的藍色視覺明確區分
+
+### 8.6 部署設定補充
+- [x] **新增多規格 Cloud Run 部署檔**：`cloudbuild_202.yaml`（2Gi/2CPU）、`cloudbuild_404.yaml`（4Gi/4CPU）、`cloudbuild_408.yaml`（8Gi/4CPU），三份均預設啟用 VIDEO_EXPORT_ENABLED
+- [x] **補充 `VIDEO_FFMPEG_BIN`**（`.env.example`）：本地 Windows 開發用，Docker / Cloud Run 留空
+- [x] **新增 `instrumentation.ts`**：伺服器啟動時自動清理 `/tmp/video-export` 殘留目錄

@@ -9,6 +9,13 @@
 4. **登入與歷史紀錄隔離**：新增 invitation code + Google OAuth 雙重驗證、`AUTH_ENABLED` 開關、HMAC session token；當 `AUTH_ENABLED=true` 時，IndexedDB 歷史紀錄會依 Google email (`ownerEmail`) 隔離。
 5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-15 張**；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
 
+### ✨ v06 補充亮點（2026-04-10）：
+1. **MP4 影片匯出**：新增 `app/api/export-video/route.ts` + `lib/videoExport.ts`，FFmpeg xfade 淡入淡出轉場，與 PPTX `<p:fade/>` 視覺一致；並行控制（auto / 手動）；5 分鐘 timeout。
+2. **VideoExportBlock 元件**：取代舊的 `VideoExportButton`；session 內只生成一次，後續點擊直接下載快取 blob；`forceRegen` 可強制重跑；503 自動重試（最多 5 次，每次等 10 秒）。
+3. **xfade 提早結束修正**：xfade 消耗輸出時間軸的 bug；修正方案：最後一張投影片延長 `sum(fadeDurs) + 2.0s`，移除 `-shortest`，確保影片與音訊對齊並有 2 秒收尾靜止。
+4. **Podcast 結尾問題**：`PODCAST_PROMPT_TEMPLATE` 新增結尾規則，最後一頁由主持人拋出開放式問題 + 另一位給語境化回應；使用抽象描述避免字面範例造成 LLM 每次複製同一句話。
+5. **多規格 Cloud Run 部署**：新增 `cloudbuild_202.yaml` / `cloudbuild_404.yaml` / `cloudbuild_408.yaml` 三份設定，對應 2Gi / 4Gi / 8Gi 記憶體規格，均預設啟用影片匯出。
+
 ### ✨ v05 補充亮點（2026-04-07）：
 1. **模型選單收斂為四組**：Step 0 目前改為 `Step 1 / 4.1 / 7.1`、`Step 2 / 4.2 / 5 / 7.2`、`Step 3`、`Step 6` 四組模型下拉，UI 與後端實際能力一致。
 2. **Podcast / Music 對齊正式拆為雙階段**：`4.1 / 7.1` 固定負責多模態音訊理解與字幕修正；`4.2 / 7.2` 固定負責 `script/lyrics + SRT` 的文字對齊與 `startSrtId` 推斷。
@@ -151,27 +158,32 @@ pocast2/
 │       ├── generate-podcast/route.ts
 │       ├── generate-music/route.ts
 │       ├── align-podcast/route.ts
-│       └── align-music/route.ts
+│       ├── align-music/route.ts
+│       ├── export-video/route.ts  ← MP4 影片匯出（需 VIDEO_EXPORT_ENABLED=true）
+│       └── runtime-config/route.ts
 ├── components/
-│   └── LoginPage.tsx      ← auth 啟用時的登入頁
+│   ├── LoginPage.tsx       ← auth 啟用時的登入頁
+│   └── VideoExportBlock.tsx ← 影片匯出卡片元件（含 session 快取與 503 自動重試）
+├── instrumentation.ts      ← Next.js server startup hook，清理 /tmp/video-export 殘留
 ├── lib/
-│   ├── constants.ts       ← 所有常數、上傳規則與 API key/session key 常數
-│   ├── types.ts           ← TypeScript 型別
-│   ├── auth.ts            ← server-side auth, token, rate limit, Google verify
-│   ├── authClient.ts      ← client-side auth session 存取
-│   ├── getAI.ts           ← Gemini 初始化（server side）+ session 驗證
-│   ├── apiFetch.ts        ← fetch 封裝（client side），同時帶 API key 與 auth token
-│   ├── prompts.ts         ← 提示詞建構函式
-│   ├── stripMarkdown.ts   ← 移除 Markdown 標記
-│   ├── db.ts              ← IndexedDB CRUD + owner 驗證
-│   ├── timing.ts          ← 音訊時間計算與 fallback
-│   ├── srt.ts             ← SRT 解析、修補、格式化
-│   ├── whisper.ts         ← Whisper API 串接
-│   ├── generatePptx.ts    ← PPTX 生成（client side）
-│   ├── pdfToImages.ts     ← PDF 轉圖（含 getAudioDuration）
-│   └── empty-module.js    ← webpack fallback
+│   ├── constants.ts        ← 所有常數、上傳規則與 API key/session key 常數
+│   ├── types.ts            ← TypeScript 型別
+│   ├── auth.ts             ← server-side auth, token, rate limit, Google verify
+│   ├── authClient.ts       ← client-side auth session 存取
+│   ├── getAI.ts            ← Gemini 初始化（server side）+ session 驗證
+│   ├── apiFetch.ts         ← fetch 封裝（client side），同時帶 API key 與 auth token
+│   ├── prompts.ts          ← 提示詞建構函式（PODCAST_PROMPT_TEMPLATE 含結尾規則）
+│   ├── stripMarkdown.ts    ← 移除 Markdown 標記
+│   ├── db.ts               ← IndexedDB CRUD + owner 驗證
+│   ├── timing.ts           ← 音訊時間計算與 fallback
+│   ├── srt.ts              ← SRT 解析、修補、格式化
+│   ├── whisper.ts          ← Whisper API 串接
+│   ├── generatePptx.ts     ← PPTX 生成（client side）
+│   ├── pdfToImages.ts      ← PDF 轉圖（pdfToJpegBase64 供影片匯出用）
+│   ├── videoExport.ts      ← FFmpeg 影片合成（xfade / concat）
+│   └── empty-module.js     ← webpack fallback
 └── public/
-    └── pdf.worker.min.mjs ← 從 pdfjs-dist 複製
+    └── pdf.worker.min.mjs  ← 從 pdfjs-dist 複製
 ```
 
 ---
@@ -1565,7 +1577,7 @@ Step 7：/api/align-music
     ↓  generatePptx(pdf, timings, musicBlob)
     ↓  updateRecord(musicPptxBlob + musicSrt + diagnostics + timings)
     ↓
-下載：script.txt / lyrics.txt / podcast.wav(or 原始上傳格式) / music.mp3 / podcast.srt / music.srt / podcast_slides.pptx / music_slides.pptx
+下載：script.txt / lyrics.txt / podcast.wav(or 原始上傳格式) / music.mp3 / podcast.srt / music.srt / podcast_slides.pptx / music_slides.pptx / podcast_slides.mp4（選用） / music_slides.mp4（選用）
 ```
 
 ---
@@ -1597,7 +1609,86 @@ Step 7：/api/align-music
 
 ---
 
-## 28. 部署指南 (Deployment)
+## 28. 影片匯出（Video Export）
+
+### 28.1 架構概覽
+
+MP4 影片匯出為選用功能，需設定 `VIDEO_EXPORT_ENABLED=true`，並在容器中安裝 FFmpeg（Dockerfile 已內建）。
+
+| 元件 | 說明 |
+|------|------|
+| `app/api/export-video/route.ts` | API Route，處理並行限制、請求驗證、呼叫 generateVideo() |
+| `lib/videoExport.ts` | FFmpeg 邏輯：xfade / concat args builder、並行計數、啟動清理 |
+| `components/VideoExportBlock.tsx` | 前端卡片元件：session 快取、503 自動重試、forceRegen |
+| `instrumentation.ts` | 伺服器啟動時清理 `/tmp/video-export` 殘留目錄（容器被強制終止後的防呆） |
+
+### 28.2 並行控制
+
+```typescript
+// lib/videoExport.ts
+export function getMaxConcurrentExports(): number {
+  const manual = parseInt(process.env.VIDEO_MAX_CONCURRENT ?? '0', 10);
+  if (manual > 0) return manual;
+  // Auto: (totalMemMB - 500) / 340，每個 FFmpeg job ~340MB
+  const totalMemMB = os.totalmem() / (1024 * 1024);
+  return Math.max(1, Math.floor((totalMemMB - 500) / 340));
+}
+```
+
+超過並行上限回傳 `503 { error: "伺服器忙碌中（N/M），請稍後再試" }`。
+
+**建議設定（依記憶體）：**
+| 記憶體 | VIDEO_MAX_CONCURRENT | VIDEO_FFMPEG_PRESET |
+|--------|---------------------|---------------------|
+| 2Gi | 1 | fast |
+| 4Gi | 2 | fast |
+| 8Gi | 4 | medium |
+| 128Gi | 48 | fast |
+
+### 28.3 xfade 轉場
+
+`transition='fade'` 且投影片數 > 1 時使用 `buildXfadeArgs()`，否則使用 `buildConcatArgs()`（concat demuxer）。
+
+**時序計算：**
+```
+fadeDur[i] = clamp(0.1, 0.8, timings[i].durationSec - 0.2)
+cumOffset[i] = cumOffset[i-1] + timings[i].durationSec - fadeDur[i]  // 絕對時間
+
+最後一張投影片 -t 補償：
+  lastDuration = timings[n-1].durationSec + sum(fadeDurs) + 2.0
+  (sum(fadeDurs) = xfade 消耗的時間；2.0 = PPTX 最後一頁 +2000ms)
+不加 -shortest：讓影片跑完延伸時間，最後 2 秒靜止畫面
+```
+
+### 28.4 前端 VideoExportBlock 狀態機
+
+```
+idle
+  ↓ 點擊生成
+rendering    → pdfToJpegBase64()（PDF 僅渲染一次，retry 不重跑）
+  ↓
+uploading    → POST /api/export-video
+  ↓ 503 && attempt ≤ 5
+waiting      → 等 10 秒後回到 uploading（琥珀色，顯示第 N/5 次）
+  ↓ 成功
+idle(cached) → onCached(blob)；triggerDownload()；顯示「✓ 已生成・再次下載」
+  ↓ 點「重新生成」
+idle(forceRegen) → 跳過快取重走流程
+  ↓ 錯誤（非 503 或超過 5 次重試）
+error        → 顯示錯誤訊息 + 手動「重試」按鈕
+```
+
+### 28.5 環境變數
+
+| 變數 | 說明 | 預設 |
+|------|------|------|
+| `VIDEO_EXPORT_ENABLED` | 啟用影片匯出 | `false` |
+| `NEXT_PUBLIC_VIDEO_EXPORT_ENABLED` | 前端顯示匯出按鈕（build-time） | `false` |
+| `VIDEO_MAX_CONCURRENT` | 最大並行數（0 = 自動依記憶體） | `0` |
+| `VIDEO_FFMPEG_PRESET` | FFmpeg H.264 preset（空 = 自動依 CPU） | `` |
+| `VIDEO_FFMPEG_BIN` | FFmpeg bin 目錄（僅 Windows 本地開發） | `` |
+
+## 29. 部署指南 (Deployment)
 
 專案支援多種實體部署方式，詳細操作可參考 `README.md`。此處說明 LLM 重建所需的核心部署設定檔：
 

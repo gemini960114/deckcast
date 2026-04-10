@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { setUnauthorizedHandler, apiFetch } from '@/lib/apiFetch';
 import LoginPage from '@/components/LoginPage';
+import VideoExportBlock from '@/components/VideoExportBlock';
 import { generatePptx } from '@/lib/generatePptx';
 import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings } from '@/lib/timing';
 import { adjustSrtTimes } from '@/lib/srt';
@@ -282,6 +283,8 @@ export default function Home() {
   const [musicSrtOffset, setMusicSrtOffset] = useState<number>(0);
   const [podcastTimings, setPodcastTimings] = useState<SlideTimings | null>(null);
   const [musicTimings, setMusicTimings] = useState<SlideTimings | null>(null);
+  const [podcastVideoBlob, setPodcastVideoBlob] = useState<Blob | null>(null);
+  const [musicVideoBlob, setMusicVideoBlob] = useState<Blob | null>(null);
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
@@ -290,6 +293,7 @@ export default function Home() {
   const [step6State, setStep6State] = useState<StepState>({ status: 'idle' });
   const [step7State, setStep7State] = useState<StepState>({ status: 'idle' });
   const [pptxLoading, setPptxLoading] = useState(false);
+  const [videoExportEnabled, setVideoExportEnabled] = useState(false);
   const [toast, setToast] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
@@ -347,11 +351,12 @@ export default function Home() {
       try {
         const res = await fetch('/api/runtime-config', { cache: 'no-store' });
         if (!res.ok) return;
-        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string };
+        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string; videoExportEnabled?: boolean };
         const enabled = Boolean(data.localLlmEnabled);
         const label = data.localLlmLabel?.trim() || 'Gemma 4';
         setLocalLlmEnabled(enabled);
         setLocalLlmLabel(label);
+        setVideoExportEnabled(Boolean(data.videoExportEnabled));
         setTextModel(prev => !enabled && resolveTextModelId(prev) === DEFAULT_LOCAL_TEXT_MODEL
           ? DEFAULT_TEXT_MODEL
           : resolveTextModelId(prev));
@@ -620,6 +625,7 @@ export default function Home() {
 
   async function handleGeneratePodcastPptx() {
     if (!podcastBlob || !script || !pdfFile) return;
+    setPodcastVideoBlob(null);
     setStep4State({ status: 'loading' });
     try {
       const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
@@ -735,6 +741,7 @@ export default function Home() {
 
   async function handleGenerateMusicPptx() {
     if (!musicBlob || !lyrics || !pdfFile) return;
+    setMusicVideoBlob(null);
     setStep7State({ status: 'loading' });
     try {
       const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
@@ -822,6 +829,7 @@ export default function Home() {
     if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
     if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
     if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
+    setPodcastVideoBlob(null); setMusicVideoBlob(null);
     setRecordId(rec.id); setDrawerOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' }); setToast(`已載入：${rec.pdfName}`);
   }
@@ -829,6 +837,7 @@ export default function Home() {
   function handleNewProject() {
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
+    setPodcastVideoBlob(null); setMusicVideoBlob(null);
     setPodcastInputMode('api');
     setPodcastSource('api');
     setMusicInputMode('api');
@@ -1254,6 +1263,20 @@ export default function Home() {
           </StepCard>
         </div>
 
+        {podcastPptxBlob && step4State.status === 'done' && videoExportEnabled && (
+          <VideoExportBlock
+            title="匯出 Podcast 影片"
+            pdfBlob={pdfFile}
+            audioBlob={podcastBlob}
+            timings={podcastTimings}
+            filename="podcast_slides.mp4"
+            cachedBlob={podcastVideoBlob}
+            onCached={setPodcastVideoBlob}
+            dark={dark}
+            videoExportEnabled={videoExportEnabled}
+          />
+        )}
+
         {/* ── Step 5 ── */}
         <div ref={step5Ref}>
           <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script} dark={dark}>
@@ -1392,6 +1415,20 @@ export default function Home() {
           </StepCard>
         </div>
 
+        {musicPptxBlob && step7State.status === 'done' && videoExportEnabled && (
+          <VideoExportBlock
+            title="匯出歌曲影片"
+            pdfBlob={pdfFile}
+            audioBlob={musicBlob}
+            timings={musicTimings}
+            filename="music_slides.mp4"
+            cachedBlob={musicVideoBlob}
+            onCached={setMusicVideoBlob}
+            dark={dark}
+            videoExportEnabled={videoExportEnabled}
+          />
+        )}
+
         {/* ── Download Panel ── */}
         {(slides || script || lyrics || podcastBlob || musicBlob) && (
           <div className={`rounded-2xl border-2 p-5 transition-colors duration-300 ${t.greenBg}`}>
@@ -1451,6 +1488,29 @@ export default function Home() {
                 ))}
               </div>
             </div>
+            {videoExportEnabled && (podcastVideoBlob || musicVideoBlob) && (
+              <div>
+                <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>🎬 影片</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {podcastVideoBlob && (
+                    <button
+                      onClick={() => downloadBlob(podcastVideoBlob, 'podcast_slides.mp4')}
+                      className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
+                    >
+                      ⬇ podcast_slides.mp4
+                    </button>
+                  )}
+                  {musicVideoBlob && (
+                    <button
+                      onClick={() => downloadBlob(musicVideoBlob, 'music_slides.mp4')}
+                      className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
+                    >
+                      ⬇ music_slides.mp4
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>

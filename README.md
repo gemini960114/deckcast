@@ -31,9 +31,10 @@
 
 ### Podcast 文稿生成
 - 雙人對話格式（Speaker 1 / Speaker 2）
-- 每張投影片約 30–40 秒對話量
+- 每張投影片約 30–60 秒對話量，並依照內容複雜度自然調整長度
 - 可自訂說話者角色、對話形式與語氣風格
 - 對話輪數依內容自然決定
+- 最後一張投影片結尾會由兩位主持人共同拋出一個開放式問題，讓聽眾帶著思考離開（問題與語境每次自然生成，不使用固定套話）
 
 ### 歌詞生成（14 種風格可選）
 - 嚴格依照投影片段落順序編排
@@ -79,6 +80,15 @@
 - 也支援上傳外部歌曲音訊（目前維持 `mp3`，20MB 以內）
 - 若想在外部先生成再回來上傳，可使用 [Producer.ai](https://www.producer.ai/invite/XH4T5Q)
 
+### 影片匯出（MP4）
+
+- 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
+- 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
+- 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
+- 同一 session 內只生成一次，生成後快取於瀏覽器記憶體，可多次下載而不重跑 FFmpeg
+- 需要 `VIDEO_EXPORT_ENABLED=true` 及容器內安裝 FFmpeg（Dockerfile 已內建）
+- 本地 Windows 開發時需額外設定 `VIDEO_FFMPEG_BIN` 指向 FFmpeg bin 目錄
+
 ### PowerPoint 簡報生成（AI 精準對齊轉場）
 - 後端採用 **兩階段對齊流程**：先產出/修正 SRT，再根據 `startSrtId` 找出每張投影片第一次進入的字幕位置。
 - `Step 4` 與 `Step 7` 皆可拆分為：
@@ -112,6 +122,8 @@
 | `music.srt` | 音樂字幕 | 音樂對齊完成後 |
 | `podcast_slides.pptx` | Podcast 同步簡報 | Step 4 完成後 |
 | `music_slides.pptx` | 音樂同步簡報 | Step 7 完成後 |
+| `podcast_slides.mp4` | Podcast 影片（1080p，含 fade 轉場） | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `music_slides.mp4` | 音樂影片（1080p，含 fade 轉場） | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
 
 ---
 
@@ -249,6 +261,7 @@ Gemini 回傳結果 → 前端儲存至 IndexedDB
   - 至少需開通 `gemini-3-flash-preview`、`gemini-2.5-flash-preview-tts`、`lyria-3-pro-preview`
   - 若要切換其他下拉模型，還需具備 `gemini-3.1-pro-preview`、`gemini-2.5-flash`、`gemini-2.5-pro-preview-tts` 的存取權限
 - 若要啟用登入：Google OAuth Client ID、invitation code、session secret
+- 若要啟用影片匯出（本地開發）：[FFmpeg](https://ffmpeg.org/download.html) — 安裝後設定 `VIDEO_FFMPEG_BIN` 指向 bin 目錄（Docker / Cloud Run 已內建，不需設定）
 
 ---
 
@@ -283,6 +296,14 @@ LOCAL_LLM_BASE_URL=http://127.0.0.1:8000/v1/chat/completions
 LOCAL_LLM_API_KEY=replace-with-your-local-llm-key
 LOCAL_LLM_MODEL=gemma-4-31B-it
 LOCAL_LLM_LABEL=Gemma 4 31B (Custom)
+
+# Video Export (需要 FFmpeg)
+VIDEO_EXPORT_ENABLED=true
+NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true
+VIDEO_MAX_CONCURRENT=0
+VIDEO_FFMPEG_PRESET=veryfast
+# Windows 本地開發：指向 ffmpeg.exe 所在目錄（Linux/Docker 留空即可）
+VIDEO_FFMPEG_BIN=C:\path\to\ffmpeg\bin
 ```
 
 說明：
@@ -293,6 +314,8 @@ LOCAL_LLM_LABEL=Gemma 4 31B (Custom)
 - 若 `LOCAL_LLM_BASE_URL` 已直接填到 `/chat/completions`，程式會直接使用；若只填到 `/v1`，則會自動補上 `/chat/completions`
 - `LOCAL_LLM_MODEL` 為本地模型實際送出的模型名稱，若有設定，會優先覆蓋前端同組下拉選單的本地模型值
 - `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4 31B (Custom)`
+- `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出功能；需同時設定 `NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true`（build-time）
+- `VIDEO_FFMPEG_BIN` 僅 **Windows 本地開發** 時需要，填入 ffmpeg.exe 所在目錄；Linux / Docker / Cloud Run 留空，程式直接呼叫系統 `ffmpeg`
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---
@@ -376,7 +399,7 @@ gcloud config set project gen-lang-client-0039151647
 # 3. 提交 Cloud Build 部署
 #    ⚠️ 重要：在 PowerShell 中 --substitutions 值必須用雙引號包住，
 #    否則 PowerShell 會把逗號當陣列分隔符，導致環境變數設定錯誤。
-gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom)"
+gcloud builds submit --config cloudbuild.yaml "--substitutions=_AUTH_ENABLED=true,_NEXT_PUBLIC_AUTH_ENABLED=true,_INVITATION_CODE=1234,_SESSION_SECRET=1234,_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NEXT_PUBLIC_GOOGLE_CLIENT_ID=57229660377-v7jstv378vq150lpn8bt32afsubde7ki.apps.googleusercontent.com,_NCHC_WHISPER_API_KEY=1234,_NCHC_WHISPER_MODEL=whisper-Breeze-ASR-25,_NCHC_WHISPER_URL=https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions,_LOCAL_LLM_BASE_URL=https://portal.genai.nchc.org.tw/api/v1/chat/completions,_LOCAL_LLM_API_KEY=1234,_LOCAL_LLM_MODEL=gemma-4-31B-it,_LOCAL_LLM_LABEL=Gemma 4 31B (Custom),_VIDEO_EXPORT_ENABLED=true,_NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true,_MEMORY=2Gi"
 ```
 
 若你要部署高承載版本，改用：
@@ -394,6 +417,8 @@ gcloud builds submit --config cloudbuild_500.yaml "--substitutions=_AUTH_ENABLED
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
 - `LOCAL_LLM_BASE_URL` 若填到 `/v1`，程式會自動補成 `/chat/completions`；若你已直接提供完整的 `/chat/completions` 端點，也可以直接使用
+- `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出；`cloudbuild.yaml` 預設為 `false`，需手動帶入 substitution。`cloudbuild_202.yaml` / `cloudbuild_404.yaml` / `cloudbuild_408.yaml` 預設已啟用
+- `_MEMORY` 在 `cloudbuild.yaml` 預設為 `512Mi`，啟用影片匯出時必須加到 `2Gi` 以上，否則 FFmpeg 會因 OOM 崩潰
 - 若部署後 Cloud Run 顯示「需要驗證」而非「公開存取」，可執行 `gcloud run services add-iam-policy-binding <service-name> --region asia-east1 --member="allUsers" --role="roles/run.invoker"` 開放匿名呼叫
 - **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 
@@ -412,4 +437,5 @@ gcloud builds submit --config cloudbuild_500.yaml "--substitutions=_AUTH_ENABLED
 - 生成歌詞並預覽
 - 生成或上傳歌曲音訊並播放
 - 生成音樂簡報並下載 SRT / PPTX
+- （選用）匯出 Podcast / 音樂 MP4 影片並下載，同一 session 內快取不重跑
 - 重新整理頁面後歷史紀錄仍存在，且 auth 啟用時會依 Google 帳號隔離
