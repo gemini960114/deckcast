@@ -3,17 +3,18 @@ import { buildNarrationPrompt } from '@/lib/prompts';
 import { stripMarkdown } from '@/lib/stripMarkdown';
 import { unauthorizedResponse } from '@/lib/getAI';
 import { generateText } from '@/lib/llm';
-import type { NarrationMode } from '@/lib/types';
+import type { NarrationMode, ContentLanguage } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo' } = await req.json();
+    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo', contentLanguage } = await req.json();
     const prompt = buildNarrationPrompt({
       mode: narrationMode as NarrationMode,
       speaker1,
       speaker2,
       dialogueStyle,
       tone,
+      language: contentLanguage as ContentLanguage | undefined,
     });
 
     const raw = await generateText(req, {

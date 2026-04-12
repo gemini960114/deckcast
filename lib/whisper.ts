@@ -1,5 +1,21 @@
-import type { SrtEntry } from './types';
+import type { SrtEntry, ContentLanguage } from './types';
 import { repairSrtEntries, srtEntriesToText } from './srt';
+
+/**
+ * Maps a ContentLanguage value to the language code expected by Whisper.
+ * Returns undefined (auto-detect) for unknown/missing values.
+ */
+export function mapContentLanguageToWhisperLanguage(
+  language?: ContentLanguage
+): string | undefined {
+  switch (language) {
+    case 'zh-TW': return 'zh';
+    case 'en':    return 'en';
+    case 'ja':    return 'ja';
+    case 'ko':    return 'ko';
+    default:      return undefined;
+  }
+}
 
 const DEFAULT_WHISPER_URL = 'https://portal.genai.nchc.org.tw/api/v1/audio/transcriptions';
 const DEFAULT_WHISPER_MODEL = 'whisper-Breeze-ASR-25';
@@ -87,7 +103,9 @@ export async function transcribeAudioWithWhisper(params: {
   const form = new FormData();
   form.append('file', new Blob([audioBytes], { type: mimeType }), guessFileName(mimeType));
   form.append('model', model);
-  form.append('language', params.language || 'zh');
+  if (params.language) {
+    form.append('language', params.language);
+  }
   form.append('response_format', 'json');
 
   const response = await fetch(url, {

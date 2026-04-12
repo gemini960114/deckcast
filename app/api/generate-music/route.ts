@@ -7,7 +7,8 @@ export const maxDuration = 300;
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { lyrics, duration, musicModel } = await req.json();
+    const { lyrics, duration, musicModel, contentLanguage } = await req.json();
+    console.log(`[generate-music] contentLanguage=${contentLanguage ?? 'zh-TW'}`);
 
     const modelName = getMusicModel(duration ?? '90-second', musicModel);
 

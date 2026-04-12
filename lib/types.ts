@@ -1,5 +1,7 @@
 export type NarrationMode = 'duo' | 'solo_explainer' | 'solo_story';
 
+export type ContentLanguage = 'zh-TW' | 'en' | 'ja' | 'ko';
+
 export interface SlideTiming {
   slideIndex: number;
   startSec: number;
@@ -44,6 +46,7 @@ export interface GenerationRecord {
   pdfName: string;
   createdAt: number;
   ownerEmail?: string;
+  contentLanguage?: ContentLanguage;
   multimodalModel?: string;
   textModel?: string;
   step41Model?: string;

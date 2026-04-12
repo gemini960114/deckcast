@@ -2,6 +2,22 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v10 補充亮點（2026-04-12，plan_J1 + 品質修正）：
+1. **Whisper 多語對齊修正（plan_J1）**：`lib/whisper.ts` 新增 `mapContentLanguageToWhisperLanguage()`（`zh-TW→zh / en→en / ja→ja / ko→ko`），並移除原本隱藏的 `|| 'zh'` fallback（改為有值才 append language，否則讓 Whisper auto-detect）；`align-podcast/route.ts` 與 `align-music/route.ts` 接收 `contentLanguage` 並透過 mapping 傳給 Whisper，不再寫死 `'zh'`；`app/page.tsx` Step 4 / Step 7 的 align API request body 補傳 `contentLanguage`，確保多語專案的對齊鏈完整。
+2. **`loadRecord()` 殘留狀態修正**：`app/page.tsx` 的 `loadRecord()` 對所有 blob（`pdfFile` / `podcastBlob` / `podcastPptxBlob` / `musicBlob` / `musicPptxBlob`）、step states（Step 1~7）、以及 speaker / voice / dialogueStyle / tone 欄位均補上 `else` 清空邏輯；載入不完整 record 時不再殘留前一個專案的狀態。
+3. **`handleNewProject()` 設計意圖明確化**：加入 code comment 說明「保留偏好設定（speaker / voice / style / model）、只清除專案內容」為刻意設計，非 bug。
+4. **ESLint 程式碼清理**：移除 `VideoExportBlock.tsx` 未用的 `isLoading`；移除 `lib/prompts.ts` 中未用的 imports（`DEFAULT_SPEAKER1` / `DEFAULT_DIALOGUE_STYLE` / `DEFAULT_TONE`）與廢棄的 `LYRICS_PROMPT_TIMED_OLD` / `LYRICS_PROMPT_TIMED_OLD2`；`lib/srt.ts` 的 `catch (e)` 改為 `catch {}`；`public/pdf.worker.min.mjs` 屬第三方 minified 檔案，不納入 lint 範圍（config-protection hook 保護，不修改 eslint config）。
+5. **README 資料修正**：TTS 聲音預設值由錯誤的「Speaker 1 = Zephyr (Male) / Speaker 2 = Puck (Female)」更正為「Speaker 1 = Puck (Male) / Speaker 2 = Zephyr (Female)」（符合 `lib/types.ts` VOICES 定義）；Step 1/4.1/7.1 預設模型更正為 `gemini-2.5-flash`（符合 `DEFAULT_STEP41_MODEL`）。
+
+### ✨ v09 補充亮點（2026-04-12，plan_J）：
+1. **`contentLanguage` 多語支援**：新增全專案共用語言設定 `ContentLanguage`（`'zh-TW' | 'en' | 'ja' | 'ko'`），統一控制 Podcast 文稿（Step 2）、歌詞（Step 5）及對應 TTS / 音樂生成（Step 3 / 6）的內容語言。
+2. **型別與常數**：`lib/types.ts` 新增 `ContentLanguage` type 與 `GenerationRecord.contentLanguage?`；`lib/constants.ts` 新增 `DEFAULT_CONTENT_LANGUAGE`（`'zh-TW'`）、`CONTENT_LANGUAGE_OPTIONS`（四語選單）、`CONTENT_LANGUAGE_PROMPT_LABEL`（語言代碼 → 英文標示 Map）。
+3. **Prompt 語言化**：`lib/prompts.ts` 新增 `buildLanguageBlock(language)` — `zh-TW` 回傳空字串（行為不變）；其他語言產生強硬的【語言指定】區塊，明確禁止模型翻譯 `風格:` / `投影片 N:` / `Speaker 1:` / `Speaker 2:` 等 parser 依賴結構標記，含正反例，防止本地 Gemma 4 LLM 誤翻。`buildNarrationPrompt()` / `buildLyricsPrompt()` 均新增可選 `language?` 參數（預設 `zh-TW`，行為向下相容）。歌詞 prompt 額外加入 K-POP/J-POP 多語混唱例外規則。
+4. **Record 流完整覆蓋**：`app/page.tsx` 所有 `updateRecord` 路徑（共 12 處）均帶入 `contentLanguage`——包含 `saveRecord`、Steps 2~7 主流程、兩個音檔 upload handler（Step 3 / 6）、兩個 SRT 偏移重封裝（`handleRepackPodcastPptx` / `handleRepackMusicPptx`）、`handleNarrationModeChange` 模式切換，以及 `loadRecord`（含 `?? DEFAULT_CONTENT_LANGUAGE` fallback）與 `handleNewProject`（重置），確保任意執行路徑後 IndexedDB 均持有最新語言設定，舊紀錄 backfill 徹底完整不 crash。
+5. **UI 語言選單**：Step 2 設定區（語氣風格欄位後）新增「內容語言」下拉選單；非 `zh-TW` 時顯示琥珀色提示「非繁體中文建議搭配 Gemini 文字模型使用」。
+6. **Audio Route logging**：`generate-podcast` / `generate-music` route 接收並 log `contentLanguage`，方便後續診斷與擴充（如 Lyria wrapper prompt）。
+7. **延後項目（J6）**：Step 4 / Step 7 的 alignment prompt 語言化（`align-podcast` / `align-music` route 及前端 API 呼叫需同步修改）列為後續優化，本期不納入，以控制回歸範圍。
+
 ### ✨ v08 補充亮點（2026-04-12）：
 1. **TTS 分段生成（plan_I / plan_I01）**：新增 `TTS_CHUNKING_ENABLED` feature flag；啟用後，腳本超過 `TTS_CHUNK_CHARS`（預設 1000）字元時以投影片邊界自動切段，各段 PCM 串接後插入 800ms（`CHUNK_GAP_MS`）靜音，解決 Gemini TTS 長篇破音問題；duo 與 solo 均套用。新增 `createSilence()`、`trimLeadingSilence()`、`trimTrailingSilence()`、`concatPcmChunks()` 整條 `Uint8Array` PCM 鏈，解決 TypeScript 5.x `Buffer<ArrayBufferLike>` 型別錯誤。
 2. **TTS 自動重試**：`callTtsApi()` 對 Gemini TTS 500 系列錯誤最多重試 2 次（間隔 2 秒），4xx 錯誤直接拋出不重試。

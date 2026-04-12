@@ -9,7 +9,7 @@ import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuratio
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, GenerationRecord, NarrationMode, StepState, SlideTimings } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, StepState, SlideTimings } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -21,6 +21,7 @@ import {
   LYRICS_DURATIONS, voiceSampleUrl,
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
   TTS_WARN_SEC, TTS_LONG_SEC, TTS_CHUNK_CHARS, CHUNK_GAP_MS,
+  DEFAULT_CONTENT_LANGUAGE, CONTENT_LANGUAGE_OPTIONS,
 } from '@/lib/constants';
 import { estimateTtsDuration, estimateChunkCount } from '@/lib/ttsEstimate';
 
@@ -258,6 +259,7 @@ export default function Home() {
   const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
   const [narrationMode, setNarrationMode] = useState<NarrationMode>('duo');
+  const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(DEFAULT_CONTENT_LANGUAGE);
   const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
@@ -524,6 +526,7 @@ export default function Home() {
         pdfName: file.name,
         createdAt: Date.now(),
         ownerEmail: normalizedOwnerEmail,
+        contentLanguage,
         narrationMode,
         speaker1,
         speaker2,
@@ -561,10 +564,11 @@ export default function Home() {
         dialogueStyle: dialogueStyle || DEFAULT_DIALOGUE_STYLE,
         tone: tone || DEFAULT_TONE,
         textModel,
+        contentLanguage,
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setScript(data.script); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { script: data.script, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -573,14 +577,14 @@ export default function Home() {
     if (!script) return; setStep3State({ status: 'loading' });
     try {
       setPodcastInputMode('api');
-      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel, narrationMode });
+      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel, narrationMode, contentLanguage });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       resetPodcastDerivedState();
       setPodcastBlob(blob);
       setPodcastSource('api');
       setStep3State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'api', voice1, voice2, ttsModel }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'api', voice1, voice2, ttsModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep3State({ status: 'error', error: String(e) }); setToast('Podcast 音訊生成失敗：' + String(e)); }
   }
@@ -608,7 +612,7 @@ export default function Home() {
       setPodcastBlob(blob);
       setPodcastSource('upload');
       setStep3State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'upload' }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'upload', contentLanguage }, normalizedOwnerEmail);
       setToast(`已上傳音訊：${file.name}`);
       setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
@@ -635,6 +639,7 @@ export default function Home() {
         podcastPptxBlob: pptx,
         podcastTimings: newTimings,
         podcastSrt: adjustedSrt,
+        contentLanguage,
       }, normalizedOwnerEmail);
       setToast(`已套用平移 (${appliedOffset > 0 ? '+' : ''}${appliedOffset}s) 並重新封裝 Podcast 簡報！`);
     } catch (e) {
@@ -661,6 +666,7 @@ export default function Home() {
         musicPptxBlob: pptx,
         musicTimings: newTimings,
         musicSrt: adjustedSrt,
+        contentLanguage,
       }, normalizedOwnerEmail);
       setToast(`已套用平移 (${appliedOffset > 0 ? '+' : ''}${appliedOffset}s) 並重新封裝歌曲簡報！`);
     } catch (e) {
@@ -685,6 +691,7 @@ export default function Home() {
         textModel,
         step41Model: multimodalModel,
         step42Model: textModel,
+        contentLanguage,
       });
       let timings;
       let srt = '';
@@ -713,6 +720,7 @@ export default function Home() {
           textModel,
           step41Model: multimodalModel,
           step42Model: textModel,
+          contentLanguage,
         }, normalizedOwnerEmail);
       }
       setToast('Podcast 簡報已生成！'); loadHistory();
@@ -725,10 +733,10 @@ export default function Home() {
   async function handleGenerateLyrics() {
     if (!script) return; setStep5State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-lyrics', { lyricsSource, styleId, duration: lyricsDuration, textModel });
+      const res = await apiFetch('/api/generate-lyrics', { lyricsSource, styleId, duration: lyricsDuration, textModel, contentLanguage });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step6Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep5State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
   }
@@ -737,14 +745,14 @@ export default function Home() {
     if (!lyrics) return; setStep6State({ status: 'loading' });
     try {
       setMusicInputMode('api');
-      const res = await apiFetch('/api/generate-music', { lyrics, styleId, duration: lyricsDuration, musicModel });
+      const res = await apiFetch('/api/generate-music', { lyrics, styleId, duration: lyricsDuration, musicModel, contentLanguage });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       resetMusicDerivedState();
       setMusicBlob(blob);
       setMusicSource('api');
       setStep6State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'api', musicModel }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'api', musicModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
       const msg = String(e); const isBlocked = msg.includes('PROHIBITED_CONTENT');
@@ -776,7 +784,7 @@ export default function Home() {
       setMusicBlob(blob);
       setMusicSource('upload');
       setStep6State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'upload' }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { musicBlob: blob, musicSource: 'upload', contentLanguage }, normalizedOwnerEmail);
       setToast(`已上傳音樂：${file.name}`);
       setTimeout(() => step7Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
@@ -803,6 +811,7 @@ export default function Home() {
         textModel,
         step71Model: multimodalModel,
         step72Model: textModel,
+        contentLanguage,
       });
       let timings;
       let srt = '';
@@ -833,6 +842,7 @@ export default function Home() {
           textModel,
           step71Model: multimodalModel,
           step72Model: textModel,
+          contentLanguage,
         }, normalizedOwnerEmail);
       }
       setToast('音樂簡報已生成！'); loadHistory();
@@ -842,10 +852,14 @@ export default function Home() {
   }
 
   function loadRecord(rec: GenerationRecord) {
+    setContentLanguage(rec.contentLanguage ?? DEFAULT_CONTENT_LANGUAGE);
     setNarrationMode(rec.narrationMode ?? 'duo');
-    if (rec.speaker1) setSpeaker1(rec.speaker1); if (rec.speaker2) setSpeaker2(rec.speaker2);
-    if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); if (rec.tone) setTone(rec.tone);
-    if (rec.voice1) setVoice1(rec.voice1); if (rec.voice2) setVoice2(rec.voice2);
+    if (rec.speaker1) setSpeaker1(rec.speaker1); else setSpeaker1(DEFAULT_SPEAKER1);
+    if (rec.speaker2) setSpeaker2(rec.speaker2); else setSpeaker2(DEFAULT_SPEAKER2);
+    if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); else setDialogueStyle(DEFAULT_DIALOGUE_STYLE);
+    if (rec.tone) setTone(rec.tone); else setTone(DEFAULT_TONE);
+    if (rec.voice1) setVoice1(rec.voice1); else setVoice1(DEFAULT_VOICE1);
+    if (rec.voice2) setVoice2(rec.voice2); else setVoice2(DEFAULT_VOICE2);
     if (rec.multimodalModel) setMultimodalModel(resolveStep41ModelId(rec.multimodalModel));
     else if (rec.step41Model) setMultimodalModel(resolveStep41ModelId(rec.step41Model));
     else if (rec.step71Model) setMultimodalModel(resolveStep41ModelId(rec.step71Model));
@@ -858,18 +872,18 @@ export default function Home() {
     if (rec.ttsModel) setTtsModel(rec.ttsModel);
     if (rec.musicModel) setMusicModel(rec.musicModel);
     if (rec.styleId) setStyleId(rec.styleId); if (rec.lyricsDuration) setLyricsDuration(rec.lyricsDuration);
-    if (rec.pdfBlob) setPdfFile(new File([rec.pdfBlob], rec.pdfName, { type: 'application/pdf' }));
-    if (rec.slides) { setSlides(rec.slides); setStep1State({ status: 'done' }); }
-    if (rec.script) { setScript(rec.script); setStep2State({ status: 'done' }); }
-    if (rec.podcastBlob) { setPodcastBlob(rec.podcastBlob); setStep3State({ status: 'done' }); }
+    if (rec.pdfBlob) setPdfFile(new File([rec.pdfBlob], rec.pdfName, { type: 'application/pdf' })); else setPdfFile(null);
+    if (rec.slides) { setSlides(rec.slides); setStep1State({ status: 'done' }); } else { setSlides(''); setStep1State({ status: 'idle' }); }
+    if (rec.script) { setScript(rec.script); setStep2State({ status: 'done' }); } else { setScript(''); setStep2State({ status: 'idle' }); }
+    if (rec.podcastBlob) { setPodcastBlob(rec.podcastBlob); setStep3State({ status: 'done' }); } else { setPodcastBlob(null); setStep3State({ status: 'idle' }); }
     setPodcastInputMode(rec.podcastSource ?? 'api');
     setPodcastSource(rec.podcastSource ?? 'api');
-    if (rec.podcastPptxBlob) { setPodcastPptxBlob(rec.podcastPptxBlob); setStep4State({ status: 'done' }); }
-    if (rec.lyrics) { setLyrics(rec.lyrics); setStep5State({ status: 'done' }); }
-    if (rec.musicBlob) { setMusicBlob(rec.musicBlob); setStep6State({ status: 'done' }); }
+    if (rec.podcastPptxBlob) { setPodcastPptxBlob(rec.podcastPptxBlob); setStep4State({ status: 'done' }); } else { setPodcastPptxBlob(null); setStep4State({ status: 'idle' }); }
+    if (rec.lyrics) { setLyrics(rec.lyrics); setStep5State({ status: 'done' }); } else { setLyrics(''); setStep5State({ status: 'idle' }); }
+    if (rec.musicBlob) { setMusicBlob(rec.musicBlob); setStep6State({ status: 'done' }); } else { setMusicBlob(null); setStep6State({ status: 'idle' }); }
     setMusicInputMode(rec.musicSource ?? 'api');
     setMusicSource(rec.musicSource ?? 'api');
-    if (rec.musicPptxBlob) { setMusicPptxBlob(rec.musicPptxBlob); setStep7State({ status: 'done' }); }
+    if (rec.musicPptxBlob) { setMusicPptxBlob(rec.musicPptxBlob); setStep7State({ status: 'done' }); } else { setMusicPptxBlob(null); setStep7State({ status: 'idle' }); }
     if (rec.podcastSrt) setPodcastSrt(rec.podcastSrt); else setPodcastSrt('');
     if (rec.podcastDiagnostics) setPodcastDiagnostics(rec.podcastDiagnostics); else setPodcastDiagnostics(null);
     if (rec.podcastTimings) setPodcastTimings(rec.podcastTimings); else setPodcastTimings(null);
@@ -906,6 +920,7 @@ export default function Home() {
     // Also clear mode-derived fields in DB so reloading the record stays consistent
     if (recordId) void updateRecord(recordId, {
       narrationMode: mode,
+      contentLanguage,
       script: undefined,
       lyrics: undefined,
       podcastSrt: undefined,
@@ -918,6 +933,10 @@ export default function Home() {
   }
 
   function handleNewProject() {
+    // Design intent: clear project content only, keep user preferences
+    // (speaker, voice, style, model settings). Users expect their workflow
+    // setup to persist across projects; only the content is project-specific.
+    setContentLanguage(DEFAULT_CONTENT_LANGUAGE);
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
     setPodcastVideoBlob(null); setMusicVideoBlob(null);
@@ -1145,6 +1164,20 @@ export default function Home() {
             <div>
               <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
               <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂" className={inputCls} />
+            </div>
+            <div>
+              <label className={labelCls}>內容語言</label>
+              <select value={contentLanguage} onChange={e => setContentLanguage(e.target.value as ContentLanguage)} className={selectCls}>
+                {CONTENT_LANGUAGE_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              {contentLanguage !== 'zh-TW' && (
+                <p className={`mt-1 text-[10px] ${dark ? 'text-amber-400/80' : 'text-amber-600'}`}>
+                  非繁體中文建議搭配 Gemini 文字模型使用
+                </p>
+              )}
+              <p className={`mt-0.5 text-[10px] ${t.faint}`}>影響 Podcast 文稿、語音、歌詞與歌曲生成</p>
             </div>
           </div>
 

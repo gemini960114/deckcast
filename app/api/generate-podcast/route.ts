@@ -269,9 +269,10 @@ async function callTtsApi(
 export async function POST(req: NextRequest) {
   try {
     const ai = getAI(req);
-    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo' } = await req.json();
+    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo', contentLanguage } = await req.json();
     const modelName = resolveTtsModel(ttsModel);
     const isDuo = narrationMode === 'duo';
+    console.log(`[generate-podcast] contentLanguage=${contentLanguage ?? 'zh-TW'} narrationMode=${narrationMode}`);
 
     // I5: Feature flag — split or passthrough
     const chunkingEnabled = process.env.TTS_CHUNKING_ENABLED === 'true';

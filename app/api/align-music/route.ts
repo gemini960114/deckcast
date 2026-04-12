@@ -14,7 +14,8 @@ import {
   normalizeTimings,
 } from '@/lib/timing';
 import type { AlignMusicDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
-import { isWhisperConfigured, transcribeAudioWithWhisper } from '@/lib/whisper';
+import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
+import type { ContentLanguage } from '@/lib/types';
 import { generateText } from '@/lib/llm';
 
 export const maxDuration = 300;
@@ -213,7 +214,9 @@ export async function POST(req: NextRequest) {
       textModel,
       step71Model,
       step72Model,
+      contentLanguage,
     } = await req.json();
+    const whisperLanguage = mapContentLanguageToWhisperLanguage(contentLanguage as ContentLanguage | undefined);
 
     if (!lyrics || !audioBase64) {
       return NextResponse.json({ error: 'Missing lyrics or audio data' }, { status: 400 });
@@ -241,7 +244,7 @@ export async function POST(req: NextRequest) {
         const transcription = await transcribeAudioWithWhisper({
           audioBase64,
           mimeType: safeAudioMimeType,
-          language: 'zh',
+          language: whisperLanguage,
         });
 
         if (transcription.srtEntries.length) {

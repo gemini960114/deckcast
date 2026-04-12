@@ -117,6 +117,26 @@ export function isGeminiModel(model?: string): boolean {
   return GEMINI_MODEL_NAMES.has(model ?? '');
 }
 
+// ===== Content Language =====
+import type { ContentLanguage } from './types';
+
+export const DEFAULT_CONTENT_LANGUAGE: ContentLanguage = 'zh-TW';
+
+export const CONTENT_LANGUAGE_OPTIONS: { value: ContentLanguage; label: string }[] = [
+  { value: 'zh-TW', label: '繁體中文（zh-TW）' },
+  { value: 'en',    label: 'English' },
+  { value: 'ja',    label: '日本語' },
+  { value: 'ko',    label: '한국어' },
+];
+
+/** 傳給 prompt 的語言標示（英文，模型最穩定） */
+export const CONTENT_LANGUAGE_PROMPT_LABEL: Record<ContentLanguage, string> = {
+  'zh-TW': 'Traditional Chinese (Taiwan)',
+  'en':    'English',
+  'ja':    'Japanese',
+  'ko':    'Korean',
+};
+
 // ===== Default Settings =====
 export const DEFAULT_SPEAKER1 = '男生為節目主持人 阿哲';
 export const DEFAULT_SPEAKER2 = '女生為高師大的老師 Mary 老師（具教學經驗，說明清楚）';

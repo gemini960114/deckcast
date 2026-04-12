@@ -1,5 +1,5 @@
-import { DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE } from './constants';
-import type { NarrationMode } from './types';
+import { DEFAULT_SPEAKER2, CONTENT_LANGUAGE_PROMPT_LABEL, DEFAULT_CONTENT_LANGUAGE } from './constants';
+import type { NarrationMode, ContentLanguage } from './types';
 
 export const GENERATE_MUSIC_SRT = `
 你將收到兩種資料：
@@ -174,13 +174,33 @@ export const PARSE_PDF_PROMPT =
 
 // ===== Narration Prompts (F: three-mode system) =====
 
+/** 產生放在 narration prompt 最前面的語言指定區塊 */
+function buildLanguageBlock(language: ContentLanguage): string {
+  if (language === 'zh-TW') return ''; // 預設語言不需要額外指定
+  const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[language];
+  return `【語言指定】
+以下所有實際講話內容必須使用 ${langLabel} 撰寫。
+但以下固定結構標記不論內容語言為何，均必須維持原樣，不可翻譯：
+- 風格:
+- 投影片 N:（N 為數字）
+- Speaker 1:
+- Speaker 2:
+
+錯誤範例：Slide 1:、スライド 1:、슬라이드 1:（這些都是錯誤的）
+正確範例：投影片 1:（即使內容是 ${langLabel} 也一樣）
+Do not translate these markers into any other language.
+
+`;
+}
+
 export const DUO_PODCAST_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
   speaker2: string;
   dialogueStyle: string;
   tone: string;
+  language: ContentLanguage;
 }) =>
-  `我想製作一個雙人對談節目，介紹以下每一張投影片內容。
+  `${buildLanguageBlock(vars.language)}我想製作一個雙人對談節目，介紹以下每一張投影片內容。
 每張投影片請產出約 30 秒至 60 秒的對話腳本，並依照內容複雜度自然調整長度。
 
 設定如下：
@@ -219,8 +239,9 @@ export const SOLO_EXPLAINER_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
   dialogueStyle: string;
   tone: string;
+  language: ContentLanguage;
 }) =>
-  `我想製作一段單人講解音訊，依序介紹以下每一張投影片內容。
+  `${buildLanguageBlock(vars.language)}我想製作一段單人講解音訊，依序介紹以下每一張投影片內容。
 每張投影片請產出約 30 秒至 60 秒的單人講解腳本，並依照內容複雜度自然調整長度。
 
 設定如下：
@@ -259,8 +280,9 @@ export const SOLO_STORY_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
   dialogueStyle: string;
   tone: string;
+  language: ContentLanguage;
 }) =>
-  `我想製作一段單人敘事音訊，依序介紹以下每一張投影片內容。
+  `${buildLanguageBlock(vars.language)}我想製作一段單人敘事音訊，依序介紹以下每一張投影片內容。
 每張投影片請產出約 30 秒至 60 秒的單人敘事腳本，並依照內容複雜度自然調整長度。
 
 設定如下：
@@ -300,7 +322,9 @@ export function buildNarrationPrompt(params: {
   speaker2?: string;
   dialogueStyle: string;
   tone: string;
+  language?: ContentLanguage;
 }): string {
+  const language = params.language ?? DEFAULT_CONTENT_LANGUAGE;
   switch (params.mode) {
     case 'duo':
       return DUO_PODCAST_PROMPT_TEMPLATE({
@@ -308,42 +332,26 @@ export function buildNarrationPrompt(params: {
         speaker2: params.speaker2 ?? DEFAULT_SPEAKER2,
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
+        language,
       });
     case 'solo_explainer':
       return SOLO_EXPLAINER_PROMPT_TEMPLATE({
         speaker1: params.speaker1,
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
+        language,
       });
     case 'solo_story':
       return SOLO_STORY_PROMPT_TEMPLATE({
         speaker1: params.speaker1,
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
+        language,
       });
   }
 }
 
 // ===== Lyrics Prompts =====
-export const LYRICS_PROMPT_TIMED_OLD = (styleLabel: string, totalSec: number, endTime: string) =>
-  `幫我創作 ${styleLabel} 風格歌詞，長度約 ${totalSec} 秒，並依照以下投影片內容順序編寫歌詞。
-
-【重要格式規範】
-你必須要在每個段落的上方，明確標註該段落歌詞是隸屬於哪一張投影片。
-格式請完全遵守：[段落名稱] —— 對應投影片 N
-(例如：[Chorus] —— 對應投影片 2)
-
-請盡情發揮創意，但務必確保每張投影片都有被清楚標記到。`;
-
-
-export const LYRICS_PROMPT_TIMED_OLD2 = (styleLabel: string, totalSec: number) =>
-  `幫我創作一首 ${styleLabel} 風格的歌曲歌詞，長度約 ${totalSec} 秒。
-
-請依照投影片內容順序發展歌詞，讓整體故事自然流動。
-
-請使用常見歌曲段落（Intro、Verse、Chorus、Bridge）。
-每個段落請標註對應時間軸與投影片頁碼，例如：[0:00 - 0:10] [Verse 1] [Slide 2]。
-`;
 
 
 export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
@@ -431,14 +439,17 @@ Intro [Slide 1]
 
 請嚴格依照上述格式輸出，不要加入任何額外說明、註解、Markdown 或時間軸標記。`;
 
-export function buildLyricsPrompt(styleLabel: string, duration: string): string {
-  // 提取數字部分，解析失敗則給予預設值 90 秒
+export function buildLyricsPrompt(styleLabel: string, duration: string, language?: ContentLanguage): string {
   const parsedSec = parseInt(duration, 10);
   const totalSec = isNaN(parsedSec) ? 90 : parsedSec;
 
-  const mm = Math.floor(totalSec / 60);
-  const ss = String(totalSec % 60).padStart(2, '0');
-  const endTime = `${mm}:${ss}`;
+  const lang = language ?? DEFAULT_CONTENT_LANGUAGE;
+  const base = LYRICS_PROMPT_TIMED(styleLabel, totalSec);
 
-  return LYRICS_PROMPT_TIMED(styleLabel, totalSec);
+  if (lang === 'zh-TW') return base;
+
+  const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[lang];
+  const langBlock = `\n【歌詞語言指定】\n所有實際演唱歌詞必須使用 ${langLabel} 撰寫。\n段落標記如 [Verse 1] [Slide 2] 必須維持既有格式，不可翻譯。\n主體語言應為 ${langLabel}；若音樂風格本身常見多語混唱（例如 K-POP、J-POP），可保留少量混語。\n`;
+
+  return base + langBlock;
 }

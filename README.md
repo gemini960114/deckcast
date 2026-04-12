@@ -190,16 +190,30 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 欄位留空時自動套用預設值。
 
+### 內容語言
+
+| 選項 | 說明 |
+|---|---|
+| 繁體中文（zh-TW）| 預設值，行為與舊版完全一致 |
+| English | 英文內容生成 |
+| 日本語 | 日文內容生成 |
+| 한국어 | 韓文內容生成 |
+
+**作用範圍**：同時影響 Podcast 文稿（Step 2）、歌詞（Step 5）、及對應的 TTS / 音樂生成（Step 3 / 6）。  
+**結構標記不會隨語言改變**：不論選哪種語言，`風格:` / `投影片 N:` / `Speaker 1:` / `Speaker 2:` / `[Verse N] [Slide N]` 標記均維持固定格式，確保 parser 與後續流程穩定。  
+**本地 LLM 注意事項**：非繁中內容建議搭配 Gemini 文字模型使用；本地 `Gemma 4 31B (Custom)` 在非繁中時可能有標記翻譯的風險，UI 會顯示提示。  
+**切換語言後**：已生成的文稿與歌詞不會自動清除，若需要對齊新語言請手動重新生成。
+
 ### TTS 聲音選擇
 
 | 角色 | 預設 | 可選 | 顯示條件 |
 |---|---|---|---|
-| Speaker 1 | Zephyr（Male） | Zephyr / Charon / Fenrir / Orus | 所有模式 |
-| Speaker 2 | Puck（Female） | Puck / Kore / Leda / Aoede | 僅雙人模式 |
+| Speaker 1 | Puck（Male） | Puck / Charon / Fenrir / Orus | 所有模式 |
+| Speaker 2 | Zephyr（Female） | Zephyr / Kore / Leda / Aoede | 僅雙人模式 |
 
 ### 模型選擇
 
-- `Step 1 / 4.1 / 7.1`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash`
+- `Step 1 / 4.1 / 7.1`：`gemini-3.1-pro-preview` / `gemini-3-flash-preview` / `gemini-2.5-flash`（預設）
 - `Step 2 / 4.2 / 5 / 7.2`：目前以 provider-aware 方式區分模型，預設為 `Gemma 4 31B (Custom)`；同時可選 `Gemma 4 26B (Google)`、`Gemma 4 31B (Google)` 與 Gemini 系列
 - `Step 3`：`gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設）
 - `Step 6`：`lyria-3-pro-preview`（預設）
@@ -224,7 +238,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 | 流程 | 可選模型 |
 |---|---|
-| Step 1 / 4.1 / 7.1 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview`（預設）/ `gemini-2.5-flash` |
+| Step 1 / 4.1 / 7.1 | `gemini-3.1-pro-preview` / `gemini-3-flash-preview` / `gemini-2.5-flash`（預設） |
 | Step 2 / 4.2 / 5 / 7.2 | `Gemini 3.1 Pro` / `Gemini 3 Flash` / `Gemini 2.5 Flash` / `Gemma 4 26B (Google)` / `Gemma 4 31B (Google)` / `Gemma 4 31B (Custom, 預設)` |
 | Step 3 | `gemini-2.5-pro-preview-tts` / `gemini-2.5-flash-preview-tts`（預設） |
 | Step 6 | `lyria-3-pro-preview`（預設） |

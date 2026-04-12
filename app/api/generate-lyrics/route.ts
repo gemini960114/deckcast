@@ -5,14 +5,15 @@ import { stripMarkdown } from '@/lib/stripMarkdown';
 import { DEFAULT_LYRICS_DURATION } from '@/lib/constants';
 import { unauthorizedResponse } from '@/lib/getAI';
 import { generateText } from '@/lib/llm';
+import type { ContentLanguage } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const { script, lyricsSource, styleId, duration = DEFAULT_LYRICS_DURATION, textModel } = await req.json();
+    const { script, lyricsSource, styleId, duration = DEFAULT_LYRICS_DURATION, textModel, contentLanguage } = await req.json();
     // lyricsSource takes priority: solo modes pass slides text to avoid mode-script tone pollution
     const content = (lyricsSource ?? script) as string;
     const styleLabel = MUSIC_STYLES.find((s) => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
-    const stylePrompt = buildLyricsPrompt(styleLabel, duration);
+    const stylePrompt = buildLyricsPrompt(styleLabel, duration, contentLanguage as ContentLanguage | undefined);
 
     const raw = await generateText(req, {
       model: textModel,

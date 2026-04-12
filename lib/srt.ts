@@ -215,7 +215,7 @@ export function adjustSrtTimes(srtText: string, offsetSeconds: number): string {
           const newEndMs = Math.max(0, endMs + offsetMs);
 
           result.push(`${msToSrtTime(newStartMs)} --> ${msToSrtTime(newEndMs)}`);
-        } catch (e) {
+        } catch {
           result.push(line);
         }
       } else {

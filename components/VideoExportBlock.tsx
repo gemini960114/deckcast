@@ -62,7 +62,6 @@ export default function VideoExportBlock({
 
   const canGenerate = Boolean(pdfBlob && audioBlob && timings && timings.length > 0);
   const showCached = cachedBlob !== null && status === 'idle' && !forceRegen;
-  const isLoading = status === 'rendering' || status === 'uploading' || status === 'waiting';
 
   async function handleGenerate() {
     if (!pdfBlob || !audioBlob || !timings) return;

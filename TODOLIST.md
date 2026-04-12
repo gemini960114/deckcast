@@ -188,3 +188,77 @@
 - [x] **`.env.example` 新增 `TTS_CHUNKING_ENABLED=false`**：附說明，方便新部署者了解用途
 - [x] **`cloudbuild.yaml` / `cloudbuild_202/404/408.yaml` 新增 `TTS_CHUNKING_ENABLED`**：以 `_TTS_CHUNKING_ENABLED` substitution 傳入；預設 `false`，需手動帶入啟用
 - [x] **`docker-compose.yml` 新增 `TTS_CHUNKING_ENABLED`**：`${TTS_CHUNKING_ENABLED:-false}` 從 `.env.local` 讀取
+
+## 12. 2026-04-12 plan_J 完成項目（contentLanguage 多語支援）
+
+### 12.1 型別與常數（J1）
+- [x] **新增 `ContentLanguage` type**（`lib/types.ts`）：`'zh-TW' | 'en' | 'ja' | 'ko'`
+- [x] **`GenerationRecord` 新增 `contentLanguage?: ContentLanguage`**：隨專案存入 IndexedDB
+- [x] **`DEFAULT_CONTENT_LANGUAGE = 'zh-TW'`**（`lib/constants.ts`）：預設繁體中文，確保舊紀錄向下相容
+- [x] **`CONTENT_LANGUAGE_OPTIONS`**（`lib/constants.ts`）：四語選單陣列，供 UI 渲染用
+- [x] **`CONTENT_LANGUAGE_PROMPT_LABEL`**（`lib/constants.ts`）：語言代碼對應英文標示 Map，傳給模型 prompt 時使用（英文標示最穩定）
+
+### 12.2 前端 UI（J2）
+- [x] **`contentLanguage` state**（`app/page.tsx`）：`useState<ContentLanguage>(DEFAULT_CONTENT_LANGUAGE)`
+- [x] **Step 2 設定區新增「內容語言」選單**：排列在「語氣風格」欄位之後、模型選單之前；使用現有 `selectCls` 樣式
+- [x] **非 zh-TW 警示提示**：選非繁中時顯示 `非繁體中文建議搭配 Gemini 文字模型使用` 琥珀色小字
+- [x] **說明文字**：選單下方顯示 `影響 Podcast 文稿、語音、歌詞與歌曲生成`
+
+### 12.3 Prompt 語言化（J3）
+- [x] **`buildLanguageBlock()`**（`lib/prompts.ts`）：`zh-TW` 回傳空字串（行為不變）；其他語言產生【語言指定】區塊，含固定結構標記保護規則與正反例，防止本地 LLM 翻譯 `風格:` / `投影片 N:` / `Speaker 1:` / `Speaker 2:` 標記
+- [x] **三個 narration template 加入 `language` 參數**：`DUO_PODCAST_PROMPT_TEMPLATE` / `SOLO_EXPLAINER_PROMPT_TEMPLATE` / `SOLO_STORY_PROMPT_TEMPLATE` 均於 prompt 開頭插入 `buildLanguageBlock(language)`
+- [x] **`buildNarrationPrompt()` 接收 `language?`**：可選，預設 `DEFAULT_CONTENT_LANGUAGE`
+- [x] **`buildLyricsPrompt()` 第三個可選參數 `language?`**：`zh-TW` 行為不變；其他語言在 prompt 末尾追加【歌詞語言指定】區塊，包含 K-POP/J-POP 多語混唱例外規則
+- [x] **`generate-script` route 讀取 `contentLanguage`**，傳入 `buildNarrationPrompt`（`lib/types` 已型別化）
+- [x] **`generate-lyrics` route 讀取 `contentLanguage`**，傳入 `buildLyricsPrompt`
+
+### 12.4 Record 流（J4）
+- [x] **`saveRecord` 帶入 `contentLanguage`**（Step 1 PDF 解析完成時）
+- [x] **`handleGenerateScript` updateRecord 帶入 `contentLanguage`**（Step 2）
+- [x] **`handleGeneratePodcast` updateRecord 帶入 `contentLanguage`**（Step 3 API 生成）
+- [x] **`handlePodcastUpload` updateRecord 帶入 `contentLanguage`**（Step 3 上傳）
+- [x] **`handleGeneratePodcastPptx` updateRecord 帶入 `contentLanguage`**（Step 4）
+- [x] **`handleGenerateLyrics` updateRecord 帶入 `contentLanguage`**（Step 5）
+- [x] **`handleGenerateMusic` updateRecord 帶入 `contentLanguage`**（Step 6 API 生成）
+- [x] **`handleMusicUpload` updateRecord 帶入 `contentLanguage`**（Step 6 上傳）
+- [x] **`handleGenerateMusicPptx` updateRecord 帶入 `contentLanguage`**（Step 7）
+- [x] **`loadRecord()` 回填 `contentLanguage`**：`rec.contentLanguage ?? DEFAULT_CONTENT_LANGUAGE`（舊紀錄無此欄位時平滑 fallback）
+- [x] **`handleNewProject()` 重置 `contentLanguage`**：新專案時恢復 `DEFAULT_CONTENT_LANGUAGE`
+- [x] **`handleRepackPodcastPptx` updateRecord 帶入 `contentLanguage`**（SRT 偏移重封裝 Step 4）
+- [x] **`handleRepackMusicPptx` updateRecord 帶入 `contentLanguage`**（SRT 偏移重封裝 Step 7）
+- [x] **`handleNarrationModeChange` updateRecord 帶入 `contentLanguage`**（模式切換即時持久化）
+- [x] **所有 updateRecord 呼叫已完整覆蓋**：Steps 2~7 + 兩個 upload handler + 兩個 repack + narrationMode 切換，任意路徑執行後 IndexedDB 均持有最新 contentLanguage，舊 record backfill 徹底完整
+
+### 12.5 Audio Route logging（J5）
+- [x] **`generate-podcast` route 接收 `contentLanguage`**：新增 `console.log` 記錄語言語境，供除錯使用
+- [x] **`generate-music` route 接收 `contentLanguage`**：同上，方便未來加 Lyria wrapper prompt
+- [x] **`app/page.tsx` Step 3 / Step 6 API 呼叫帶入 `contentLanguage`**
+
+### 12.7 Whisper 多語對齊（plan_J1）
+- [x] **`lib/whisper.ts` 新增 `mapContentLanguageToWhisperLanguage()`**：`zh-TW→zh / en→en / ja→ja / ko→ko`；未知值回傳 `undefined`（auto-detect）
+- [x] **`lib/whisper.ts` 移除隱藏 fallback**：`form.append('language', params.language || 'zh')` 改為 `if (params.language) { form.append(...) }`，避免 route 傳 undefined 時仍偷偷回退中文
+- [x] **`align-podcast/route.ts` 接收 `contentLanguage`**：import `mapContentLanguageToWhisperLanguage`，解構 `contentLanguage`，映射為 `whisperLanguage` 後傳入 `transcribeAudioWithWhisper()`
+- [x] **`align-music/route.ts` 接收 `contentLanguage`**：同上
+- [x] **`app/page.tsx` Step 4 / Step 7 align request 補傳 `contentLanguage`**：確保對齊鏈完整，不再只有生成鏈有效
+
+### 12.8 loadRecord() 殘留狀態修正
+- [x] **所有 blob / step state 補 else 清空**：`podcastBlob` / `podcastPptxBlob` / `musicBlob` / `musicPptxBlob` / `pdfFile` 以及 Step 1~7 states，有值回填、無值清空，載入不完整 record 時不殘留前一專案狀態
+- [x] **speaker / voice / dialogueStyle / tone 補 else 回預設**：欄位缺失時恢復 DEFAULT_* 值
+
+### 12.9 程式碼品質清理
+- [x] **`VideoExportBlock.tsx`**：移除未使用的 `isLoading` 變數
+- [x] **`lib/prompts.ts`**：移除未用的 imports（`DEFAULT_SPEAKER1` / `DEFAULT_DIALOGUE_STYLE` / `DEFAULT_TONE`）；移除廢棄的 `LYRICS_PROMPT_TIMED_OLD` / `LYRICS_PROMPT_TIMED_OLD2`
+- [x] **`lib/srt.ts`**：`catch (e)` → `catch {}` 清掉 unused binding
+- [x] **`handleNewProject()` 加 code comment**：明確說明「保留偏好設定、清除專案內容」為設計決策
+
+### 12.10 README 資料修正
+- [x] **TTS 聲音預設修正**：Speaker 1 = Puck（Male）、Speaker 2 = Zephyr（Female）（原本寫反且性別錯誤）
+- [x] **預設多模態模型修正**：Step 1/4.1/7.1 預設改為 `gemini-2.5-flash`（兩處：功能說明區與模型表格）
+
+### 12.11 ESLint 說明
+- [x] **專案程式碼 warnings 全清**：`VideoExportBlock` / `lib/prompts` / `lib/srt` unused warnings 已消除
+- [ ] **`public/pdf.worker.min.mjs` lint 警告**：屬第三方 minified 檔，不影響 build / 功能；config-protection hook 保護 eslint.config.mjs，警告保留為已知已評估狀態
+
+### 12.12 未做項目（明確延後）
+- [ ] **J6 Step 4 / Step 7 align prompt 語言化**：`GENERATE_PODCAST_SRT` / `REFINE_PODCAST_SRT_TEXT_PROMPT` / `GENERATE_MUSIC_SRT` / `REFINE_MUSIC_SRT_TEXT_PROMPT` 改為可參數化函式；需同步修改 `align-podcast/route.ts`、`align-music/route.ts` 與前端 API 呼叫，範圍較大，本期延後
+- [ ] **語言切換後提醒 banner**：本期不實作，降低 page.tsx 複雜度
