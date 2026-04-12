@@ -405,6 +405,37 @@ docker compose down
 使用前請先把 [`.env.example`](./.env.example) 複製成 `.env.local`，再填入實際值。
 由於 `docker compose` 的 build args 需要在建置階段就可見，建議固定使用 `docker compose --env-file .env.local ...` 這種寫法。
 
+#### 啟用 SSL（自有憑證 + 自訂網域）
+
+若需要 HTTPS，專案已內建 nginx 反向代理設定。架構如下：
+
+```
+Internet :443/:80 → nginx（SSL termination）→ deckcast:3000（內部）
+```
+
+**步驟 1：放入 SSL 憑證**
+
+將憑證檔案放到專案根目錄下的 `ssl/` 資料夾：
+
+```
+ssl/
+  cert.pem   ← 憑證（含 chain，即 fullchain.pem）
+  key.pem    ← 私鑰
+```
+
+**步驟 2：啟動（與一般方式相同）**
+
+```bash
+docker compose --env-file .env.local up -d --build
+```
+
+nginx 會自動接管 80 / 443，HTTP 請求會自動 redirect 到 HTTPS。
+
+**nginx 設定重點（`nginx/default.conf`）：**
+- `proxy_buffering off` — 確保 LLM streaming / SSE 不被暫存卡住
+- `client_max_body_size 60M` — 配合 PDF 與音訊上傳需求
+- `proxy_read_timeout 600s` — 配合長時間 AI 處理
+
 ### 方式 3：雲端部署 (Google Cloud Run)
 
 建議在部署前先確保本地端 `npm run build` 不會產生 TypeScript 語法錯誤。
