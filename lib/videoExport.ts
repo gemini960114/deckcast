@@ -131,7 +131,7 @@ function buildConcatArgs(
   threads: number,
   outputPath: string,
 ): string[] {
-  const threadArgs = threads > 0 ? ['-threads', String(threads)] : [];
+  const threadArgs = threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
   return [
     '-y',
     ...threadArgs,
@@ -183,7 +183,7 @@ function buildXfadeArgs(
   const totalFadeDuration = fadeDurs.reduce((sum, d) => sum + d, 0);
   const TAIL_SEC = 2.0; // matches generatePptx.ts +2000 ms on last slide
 
-  const threadArgs = threads > 0 ? ['-threads', String(threads)] : [];
+  const threadArgs = threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
   const args: string[] = ['-y', ...threadArgs];
 
   // One looped input per slide.
