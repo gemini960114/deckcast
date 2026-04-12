@@ -1768,7 +1768,15 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-5 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span className={`text-[11px] font-bold ${t.green}`} style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>DeckCast</span>
           <span className={`text-[11px] ${t.faint}`}>讓簡報開口說話 · AI 簡報語音生成器</span>
-          <span className={`text-[11px] ${t.faint}`}>Powered by <span className={`font-semibold ${dark ? 'text-slate-300' : 'text-slate-500'}`}>NCHC</span></span>
+			<span className={`text-[11px] ${t.faint}`}>
+			  Contact NCHC ·{" "}
+			  <a
+				href="mailto:0203126@niar.org.tw"
+				className={`underline transition-opacity hover:opacity-80 ${dark ? 'text-slate-300' : 'text-slate-600'}`}
+			  >
+				0203126@niar.org.tw
+			  </a>
+			</span>
         </div>
       </footer>
     </div>
