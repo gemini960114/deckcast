@@ -58,6 +58,19 @@ export function getFFmpegPreset(): string {
 }
 
 /**
+ * Limit FFmpeg thread count to avoid saturating the host CPU.
+ * Manual override via VIDEO_FFMPEG_THREADS env var.
+ *
+ * Default: min(2, cpuCount) — cap at 2 threads regardless of core count.
+ * Set VIDEO_FFMPEG_THREADS=0 to let FFmpeg decide (uses all cores).
+ */
+export function getFFmpegThreads(): number {
+  const manual = parseInt(process.env.VIDEO_FFMPEG_THREADS ?? '', 10);
+  if (!isNaN(manual)) return manual;
+  return Math.min(2, os.cpus().length);
+}
+
+/**
  * Auto-detect max concurrent exports from available memory.
  * Manual override via VIDEO_MAX_CONCURRENT env var (0 = auto).
  *
@@ -115,10 +128,13 @@ function buildConcatArgs(
   width: number,
   height: number,
   preset: string,
+  threads: number,
   outputPath: string,
 ): string[] {
+  const threadArgs = threads > 0 ? ['-threads', String(threads)] : [];
   return [
     '-y',
+    ...threadArgs,
     '-f', 'concat', '-safe', '0', '-i', path.join(workDir, 'slides.txt'),
     '-i', audioPath,
     '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
@@ -154,6 +170,7 @@ function buildXfadeArgs(
   width: number,
   height: number,
   preset: string,
+  threads: number,
   outputPath: string,
 ): string[] {
   const n = timings.length;
@@ -166,7 +183,8 @@ function buildXfadeArgs(
   const totalFadeDuration = fadeDurs.reduce((sum, d) => sum + d, 0);
   const TAIL_SEC = 2.0; // matches generatePptx.ts +2000 ms on last slide
 
-  const args: string[] = ['-y'];
+  const threadArgs = threads > 0 ? ['-threads', String(threads)] : [];
+  const args: string[] = ['-y', ...threadArgs];
 
   // One looped input per slide.
   // Last slide gets extra time to compensate for:
@@ -267,16 +285,17 @@ export async function generateVideo(params: GenerateVideoParams): Promise<ArrayB
     const [width, height] = params.resolution === '720p' ? [1280, 720] : [1920, 1080];
     const outputPath = path.join(workDir, 'output.mp4');
     const preset = getFFmpegPreset();
+    const threads = getFFmpegThreads();
 
     const useFade = params.transition === 'fade' && params.timings.length > 1;
     const ffmpegArgs = useFade
-      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, outputPath)
-      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, outputPath);
+      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath)
+      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath);
 
     console.log(
       `[VideoExport] Starting FFmpeg: ${params.images.length} slides, ` +
       `transition=${params.transition ?? 'none'}, ` +
-      `preset=${preset}, resolution=${width}x${height}`,
+      `preset=${preset}, threads=${threads || 'auto'}, resolution=${width}x${height}`,
     );
     const startTime = Date.now();
 
