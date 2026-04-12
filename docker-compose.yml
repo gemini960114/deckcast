@@ -17,6 +17,7 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
+      TTS_CHUNKING_ENABLED: ${TTS_CHUNKING_ENABLED:-false}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3000/"]

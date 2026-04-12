@@ -1,3 +1,5 @@
+export type NarrationMode = 'duo' | 'solo_explainer' | 'solo_story';
+
 export interface SlideTiming {
   slideIndex: number;
   startSec: number;
@@ -51,6 +53,7 @@ export interface GenerationRecord {
   ttsModel?: string;
   musicModel?: string;
   // Settings snapshot
+  narrationMode?: NarrationMode;
   speaker1?: string;
   speaker2?: string;
   dialogueStyle?: string;

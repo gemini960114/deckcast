@@ -13,6 +13,7 @@ interface VideoExportBlockProps {
   filename: string;
   cachedBlob: Blob | null;
   onCached: (blob: Blob) => void;
+  onClearCache: () => void;
   dark: boolean;
   videoExportEnabled: boolean;
 }
@@ -48,6 +49,7 @@ export default function VideoExportBlock({
   filename,
   cachedBlob,
   onCached,
+  onClearCache,
   dark,
   videoExportEnabled,
 }: VideoExportBlockProps) {
@@ -168,7 +170,7 @@ export default function VideoExportBlock({
       return (
         <button
           className={chipError}
-          onClick={() => { setStatus('idle'); setError(''); setRetryCount(0); }}
+          onClick={() => { setError(''); setRetryCount(0); void handleGenerate(); }}
         >
           重試
         </button>
@@ -200,7 +202,10 @@ export default function VideoExportBlock({
       <div className="flex items-center gap-3 flex-wrap">
         {renderButton()}
         {showCached && (
-          <button className={regenCls} onClick={() => setForceRegen(true)}>
+          <button
+            className={regenCls}
+            onClick={() => { onClearCache(); setForceRegen(true); void handleGenerate(); }}
+          >
             重新生成
           </button>
         )}

@@ -11,7 +11,8 @@ import type { SlideTimings } from '@/lib/types';
 
 export const maxDuration = 600; // 10 minutes — FFmpeg encoding can be slow
 
-const MAX_BODY_BYTES = 50 * 1024 * 1024; // 50 MB
+// 50MB audio × base64 ≈ 67MB + up to 15 slides JPEG ≈ 5MB → 150MB with 2× safety margin
+const MAX_BODY_BYTES = 150 * 1024 * 1024; // 150 MB
 
 interface ExportVideoRequest {
   images: string[];
@@ -32,13 +33,16 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 2. Body size check (App Router has no built-in bodyParser.sizeLimit)
-  const contentLength = parseInt(req.headers.get('content-length') ?? '0', 10);
-  if (contentLength > MAX_BODY_BYTES) {
-    return NextResponse.json(
-      { error: `Payload too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)` },
-      { status: 413 },
-    );
+  // 2. Body size check — pre-flight via Content-Length (best effort; may be absent from proxies)
+  const contentLengthHeader = req.headers.get('content-length');
+  if (contentLengthHeader !== null) {
+    const contentLength = parseInt(contentLengthHeader, 10);
+    if (!isNaN(contentLength) && contentLength > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { error: `Payload too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)` },
+        { status: 413 },
+      );
+    }
   }
 
   // 3. Auth check (only when AUTH_ENABLED=true)
@@ -59,10 +63,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 5. Parse and validate body
+  // 5. Read raw body and enforce real payload size (guards against missing Content-Length)
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
+  }
+  if (Buffer.byteLength(rawBody, 'utf8') > MAX_BODY_BYTES) {
+    return NextResponse.json(
+      { error: `Payload too large (max ${MAX_BODY_BYTES / 1024 / 1024}MB)` },
+      { status: 413 },
+    );
+  }
+
+  // 6. Parse and validate body
   let body: ExportVideoRequest;
   try {
-    body = (await req.json()) as ExportVideoRequest;
+    body = JSON.parse(rawBody) as ExportVideoRequest;
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
@@ -83,7 +101,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 6. Generate video
+  // 7. Generate video
   const params: GenerateVideoParams = {
     images: body.images,
     timings: body.timings,

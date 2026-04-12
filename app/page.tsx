@@ -9,7 +9,7 @@ import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuratio
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, GenerationRecord, StepState, SlideTimings } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, GenerationRecord, NarrationMode, StepState, SlideTimings } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -20,7 +20,9 @@ import {
   resolveTextModelId, resolveStep41ModelId,
   LYRICS_DURATIONS, voiceSampleUrl,
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
+  TTS_WARN_SEC, TTS_LONG_SEC, TTS_CHUNK_CHARS, CHUNK_GAP_MS,
 } from '@/lib/constants';
+import { estimateTtsDuration, estimateChunkCount } from '@/lib/ttsEstimate';
 
 // ── helpers ──
 function downloadBlob(blob: Blob, filename: string) {
@@ -255,6 +257,7 @@ export default function Home() {
   const [tone, setTone] = useState(DEFAULT_TONE);
   const [voice1, setVoice1] = useState<string>(DEFAULT_VOICE1);
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
+  const [narrationMode, setNarrationMode] = useState<NarrationMode>('duo');
   const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
@@ -294,6 +297,7 @@ export default function Home() {
   const [step7State, setStep7State] = useState<StepState>({ status: 'idle' });
   const [pptxLoading, setPptxLoading] = useState(false);
   const [videoExportEnabled, setVideoExportEnabled] = useState(false);
+  const [ttsChunkingEnabled, setTtsChunkingEnabled] = useState(false);
   const [toast, setToast] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
@@ -311,6 +315,8 @@ export default function Home() {
 
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
+  const isDuo = narrationMode === 'duo';
+  const lyricsSource = isDuo ? script : slides;
   const textModelOptions = localLlmEnabled
     ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
       ? { ...option, label: localLlmLabel }
@@ -351,12 +357,13 @@ export default function Home() {
       try {
         const res = await fetch('/api/runtime-config', { cache: 'no-store' });
         if (!res.ok) return;
-        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string; videoExportEnabled?: boolean };
+        const data = await res.json() as { localLlmEnabled?: boolean; localLlmLabel?: string; videoExportEnabled?: boolean; ttsChunkingEnabled?: boolean };
         const enabled = Boolean(data.localLlmEnabled);
         const label = data.localLlmLabel?.trim() || 'Gemma 4';
         setLocalLlmEnabled(enabled);
         setLocalLlmLabel(label);
         setVideoExportEnabled(Boolean(data.videoExportEnabled));
+        setTtsChunkingEnabled(Boolean(data.ttsChunkingEnabled));
         setTextModel(prev => !enabled && resolveTextModelId(prev) === DEFAULT_LOCAL_TEXT_MODEL
           ? DEFAULT_TEXT_MODEL
           : resolveTextModelId(prev));
@@ -433,6 +440,15 @@ export default function Home() {
     setStep4State({ status: 'idle' });
     setPodcastTimings(null);
     setPodcastSrtOffset(0);
+    setPodcastVideoBlob(null);
+    if (recordId) {
+      void updateRecord(recordId, {
+        podcastPptxBlob: undefined,
+        podcastSrt: undefined,
+        podcastDiagnostics: undefined,
+        podcastTimings: undefined,
+      }, normalizedOwnerEmail);
+    }
   }
 
   function resetMusicDerivedState() {
@@ -440,8 +456,16 @@ export default function Home() {
     setMusicSrt('');
     setMusicDiagnostics(null);
     setStep7State({ status: 'idle' });
+    setMusicTimings(null);
+    setMusicSrtOffset(0);
+    setMusicVideoBlob(null);
     if (recordId) {
-      void updateRecord(recordId, { musicPptxBlob: undefined, musicSrt: undefined, musicDiagnostics: undefined }, normalizedOwnerEmail);
+      void updateRecord(recordId, {
+        musicPptxBlob: undefined,
+        musicSrt: undefined,
+        musicDiagnostics: undefined,
+        musicTimings: undefined,
+      }, normalizedOwnerEmail);
     }
   }
 
@@ -500,6 +524,7 @@ export default function Home() {
         pdfName: file.name,
         createdAt: Date.now(),
         ownerEmail: normalizedOwnerEmail,
+        narrationMode,
         speaker1,
         speaker2,
         dialogueStyle,
@@ -530,6 +555,7 @@ export default function Home() {
     try {
       const res = await apiFetch('/api/generate-script', {
         slides,
+        narrationMode,
         speaker1: speaker1 || DEFAULT_SPEAKER1,
         speaker2: speaker2 || DEFAULT_SPEAKER2,
         dialogueStyle: dialogueStyle || DEFAULT_DIALOGUE_STYLE,
@@ -538,7 +564,7 @@ export default function Home() {
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setScript(data.script); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, speaker1, speaker2, dialogueStyle, tone, textModel }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { script: data.script, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -547,7 +573,7 @@ export default function Home() {
     if (!script) return; setStep3State({ status: 'loading' });
     try {
       setPodcastInputMode('api');
-      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel });
+      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel, narrationMode });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       resetPodcastDerivedState();
@@ -595,12 +621,22 @@ export default function Home() {
     if (!podcastBlob || !pdfFile || !podcastTimings) return;
     setStep4State({ status: 'loading' });
     try {
-      const newTimings = shiftTimings(podcastTimings, podcastSrtOffset);
+      const appliedOffset = podcastSrtOffset;
+      const newTimings = shiftTimings(podcastTimings, appliedOffset);
+      const adjustedSrt = adjustSrtTimes(podcastSrt, appliedOffset);
       const pptx = await generatePptx(pdfFile, newTimings, podcastBlob);
+      setPodcastTimings(newTimings);
+      setPodcastSrt(adjustedSrt);
+      setPodcastSrtOffset(0);
+      setPodcastVideoBlob(null);
       setPodcastPptxBlob(pptx);
       setStep4State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { podcastPptxBlob: pptx }, normalizedOwnerEmail);
-      setToast(`已套用平移 (${podcastSrtOffset > 0 ? '+' : ''}${podcastSrtOffset}s) 並重新封裝 Podcast 簡報！`);
+      if (recordId) await updateRecord(recordId, {
+        podcastPptxBlob: pptx,
+        podcastTimings: newTimings,
+        podcastSrt: adjustedSrt,
+      }, normalizedOwnerEmail);
+      setToast(`已套用平移 (${appliedOffset > 0 ? '+' : ''}${appliedOffset}s) 並重新封裝 Podcast 簡報！`);
     } catch (e) {
       setStep4State({ status: 'error', error: String(e) });
       setToast('重封裝失敗：' + String(e));
@@ -611,12 +647,22 @@ export default function Home() {
     if (!musicBlob || !pdfFile || !musicTimings) return;
     setStep7State({ status: 'loading' });
     try {
-      const newTimings = shiftTimings(musicTimings, musicSrtOffset);
+      const appliedOffset = musicSrtOffset;
+      const newTimings = shiftTimings(musicTimings, appliedOffset);
+      const adjustedSrt = adjustSrtTimes(musicSrt, appliedOffset);
       const pptx = await generatePptx(pdfFile, newTimings, musicBlob);
+      setMusicTimings(newTimings);
+      setMusicSrt(adjustedSrt);
+      setMusicSrtOffset(0);
+      setMusicVideoBlob(null);
       setMusicPptxBlob(pptx);
       setStep7State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { musicPptxBlob: pptx }, normalizedOwnerEmail);
-      setToast(`已套用平移 (${musicSrtOffset > 0 ? '+' : ''}${musicSrtOffset}s) 並重新封裝歌曲簡報！`);
+      if (recordId) await updateRecord(recordId, {
+        musicPptxBlob: pptx,
+        musicTimings: newTimings,
+        musicSrt: adjustedSrt,
+      }, normalizedOwnerEmail);
+      setToast(`已套用平移 (${appliedOffset > 0 ? '+' : ''}${appliedOffset}s) 並重新封裝歌曲簡報！`);
     } catch (e) {
       setStep7State({ status: 'error', error: String(e) });
       setToast('重封裝失敗：' + String(e));
@@ -679,7 +725,7 @@ export default function Home() {
   async function handleGenerateLyrics() {
     if (!script) return; setStep5State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-lyrics', { script, styleId, duration: lyricsDuration, textModel });
+      const res = await apiFetch('/api/generate-lyrics', { lyricsSource, styleId, duration: lyricsDuration, textModel });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
       if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel }, normalizedOwnerEmail);
@@ -796,6 +842,7 @@ export default function Home() {
   }
 
   function loadRecord(rec: GenerationRecord) {
+    setNarrationMode(rec.narrationMode ?? 'duo');
     if (rec.speaker1) setSpeaker1(rec.speaker1); if (rec.speaker2) setSpeaker2(rec.speaker2);
     if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); if (rec.tone) setTone(rec.tone);
     if (rec.voice1) setVoice1(rec.voice1); if (rec.voice2) setVoice2(rec.voice2);
@@ -830,8 +877,44 @@ export default function Home() {
     if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
     if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
     setPodcastVideoBlob(null); setMusicVideoBlob(null);
+    setPodcastSrtOffset(0); setMusicSrtOffset(0);
     setRecordId(rec.id); setDrawerOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' }); setToast(`已載入：${rec.pdfName}`);
+  }
+
+  function handleNarrationModeChange(mode: NarrationMode) {
+    if (mode === narrationMode) return;
+    setNarrationMode(mode);
+    if (script) {
+      // Clear mode-derived text content so stale duo/solo script can't be used downstream
+      setScript('');
+      setLyrics('');
+      // Reset all step states (step 3–7 depend on correct script/lyrics)
+      setStep2State({ status: 'idle' });
+      setStep3State({ status: 'idle' });
+      setStep4State({ status: 'idle' });
+      setStep5State({ status: 'idle' });
+      setStep6State({ status: 'idle' });
+      setStep7State({ status: 'idle' });
+      // Clear analysis data tied to old script
+      setPodcastSrt(''); setPodcastTimings(null); setPodcastDiagnostics(null);
+      setMusicSrt(''); setMusicTimings(null); setMusicDiagnostics(null);
+      // Note: podcastBlob / podcastPptxBlob / musicBlob / musicPptxBlob are intentionally kept
+      // — already-generated audio and PPTX assets remain valid and downloadable
+    }
+    // Persist immediately: don't wait for next script generation
+    // Also clear mode-derived fields in DB so reloading the record stays consistent
+    if (recordId) void updateRecord(recordId, {
+      narrationMode: mode,
+      script: undefined,
+      lyrics: undefined,
+      podcastSrt: undefined,
+      podcastTimings: undefined,
+      podcastDiagnostics: undefined,
+      musicSrt: undefined,
+      musicTimings: undefined,
+      musicDiagnostics: undefined,
+    }, normalizedOwnerEmail);
   }
 
   function handleNewProject() {
@@ -1005,19 +1088,64 @@ export default function Home() {
             </p>
           </div>
 
+          {/* Narration mode selector */}
+          <div className="mb-4">
+            <label className={labelCls}>表達模式</label>
+            <div className={`rounded-2xl border p-1.5 grid grid-cols-3 gap-1 ${t.inner}`}>
+              {([
+                { id: 'duo' as NarrationMode, label: '雙人對談' },
+                { id: 'solo_explainer' as NarrationMode, label: '單人講解' },
+                { id: 'solo_story' as NarrationMode, label: '單人說故事' },
+              ]).map(({ id, label }) => {
+                const active = narrationMode === id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => handleNarrationModeChange(id)}
+                    className={`rounded-xl px-3 py-2 text-center transition-all border text-xs font-bold ${active
+                      ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
+                      : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Speakers + style fields — wider grid */}
           <div className="grid grid-cols-2 gap-3 mb-4">
-            {[
-              { label: 'Speaker 1', val: speaker1, set: setSpeaker1, ph: '男生為節目主持人' },
-              { label: 'Speaker 2', val: speaker2, set: setSpeaker2, ph: '女生為 Mary 老師' },
-              { label: '對話形式', val: dialogueStyle, set: setDialogueStyle, ph: '自然流暢的對話' },
-              { label: '語氣風格', val: tone, set: setTone, ph: '親切、易懂' },
-            ].map(({ label, val, set, ph }) => (
-              <div key={label}>
-                <label className={labelCls}>{label}</label>
-                <input type="text" value={val} onChange={e => set(e.target.value)} placeholder={ph} className={inputCls} />
+            <div>
+              <label className={labelCls}>
+                {isDuo ? 'Speaker 1' : narrationMode === 'solo_explainer' ? '講者' : '敘事者'}
+              </label>
+              <input
+                type="text" value={speaker1} onChange={e => setSpeaker1(e.target.value)}
+                placeholder={isDuo ? '男生為節目主持人' : narrationMode === 'solo_explainer' ? '清晰的專業講者' : '有畫面感的故事敘述者'}
+                className={inputCls}
+              />
+            </div>
+            {isDuo && (
+              <div>
+                <label className={labelCls}>Speaker 2</label>
+                <input type="text" value={speaker2} onChange={e => setSpeaker2(e.target.value)} placeholder="女生為 Mary 老師" className={inputCls} />
               </div>
-            ))}
+            )}
+            <div>
+              <label className={labelCls}>
+                {isDuo ? '對話形式' : narrationMode === 'solo_explainer' ? '講解形式' : '敘事形式'}
+              </label>
+              <input
+                type="text" value={dialogueStyle} onChange={e => setDialogueStyle(e.target.value)}
+                placeholder={isDuo ? '自然流暢的對話' : narrationMode === 'solo_explainer' ? '清楚、穩定、條理分明' : '流動、有畫面感'}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
+              <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂" className={inputCls} />
+            </div>
           </div>
 
           {/* Voices + music — 4 col */}
@@ -1031,15 +1159,17 @@ export default function Home() {
                 {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
               </select>
             </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
-                <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70`}>▶試聽</button>
+            {isDuo && (
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
+                  <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70`}>▶試聽</button>
+                </div>
+                <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls}>
+                  {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
+                </select>
               </div>
-              <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls}>
-                {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
-              </select>
-            </div>
+            )}
             <div>
               <label className={labelCls}>歌曲風格</label>
               <select value={styleId} onChange={e => setStyleId(Number(e.target.value))} className={selectCls}>
@@ -1126,9 +1256,9 @@ export default function Home() {
 
         {/* ── Step 2 ── */}
         <div ref={step2Ref}>
-          <StepCard step={2} title="生成 Podcast 文稿" state={step2State} disabled={!slides} dark={dark}>
+          <StepCard step={2} title={isDuo ? '生成 Podcast 文稿' : narrationMode === 'solo_explainer' ? '生成講解腳本' : '生成敘事腳本'} state={step2State} disabled={!slides} dark={dark}>
             {step2State.status === 'loading'
-              ? <LoadingBar message="正在生成雙人對話文稿..." dark={dark} />
+              ? <LoadingBar message={isDuo ? '正在生成雙人對話文稿...' : narrationMode === 'solo_explainer' ? '正在生成單人講解腳本...' : '正在生成單人敘事腳本...'} dark={dark} />
               : <ActionBtn onClick={handleGenerateScript}>{step2State.status === 'done' ? '重新生成文稿' : '生成文稿'}</ActionBtn>}
             {script && step2State.status === 'done' && (
               <div className="mt-3 space-y-2">
@@ -1142,7 +1272,7 @@ export default function Home() {
 
         {/* ── Step 3 ── */}
         <div ref={step3Ref}>
-          <StepCard step={3} title="生成 Podcast 音訊" state={step3State} disabled={!script} dark={dark}>
+          <StepCard step={3} title={isDuo ? '生成 Podcast 音訊' : narrationMode === 'solo_explainer' ? '生成講解音訊' : '生成敘事音訊'} state={step3State} disabled={!script} dark={dark}>
             <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
               {[
                 { id: 'api' as const, title: 'API 生成', desc: '使用目前的Podcast生成流程' },
@@ -1167,9 +1297,42 @@ export default function Home() {
             </div>
 
             {step3State.status === 'loading'
-              ? <LoadingBar message={podcastInputMode === 'api' ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在匯入音訊檔案...'} dark={dark} />
+              ? <LoadingBar message={podcastInputMode === 'api'
+                  ? (ttsChunkingEnabled && script && (() => {
+                      const sp = estimateTtsDuration(script, narrationMode);
+                      const pause = Math.max(estimateChunkCount(script, TTS_CHUNK_CHARS) - 1, 0) * (CHUNK_GAP_MS / 1000);
+                      return sp + pause;
+                    })() >= TTS_WARN_SEC
+                      ? '正在分段生成 TTS 音訊，可能需要較久時間...'
+                      : isDuo ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在生成單人 TTS 音訊（約 30–60 秒）...')
+                  : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
                 <div className="space-y-3">
+                  {(() => {
+                    if (!script) return null;
+                    // estimateChunkCount is a UI approximation (total chars ÷ TTS_CHUNK_CHARS);
+                    // actual backend chunk count may differ due to slide boundaries and fallback logic.
+                    const speechSec  = estimateTtsDuration(script, narrationMode);
+                    const chunkCount = estimateChunkCount(script, TTS_CHUNK_CHARS);
+                    const pauseSec   = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
+                    const estSec     = speechSec + (ttsChunkingEnabled ? pauseSec : 0);
+                    const estMin     = Math.ceil(estSec * 0.8 / 60);  // 實測約為估算值的 80%
+                    if (estSec >= TTS_LONG_SEC) {
+                      return (
+                        <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-amber-900/30 border-amber-700/60 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
+                          ⚠️ 長篇腳本（約 {estMin} 分鐘），{ttsChunkingEnabled ? '將自動分段生成，預計需要較久時間，各段間有短暫停頓。' : '後段音質可能明顯劣化，建議上傳外部音訊。'}
+                        </p>
+                      );
+                    }
+                    if (estSec >= TTS_WARN_SEC) {
+                      return (
+                        <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-blue-900/30 border-blue-700/60 text-blue-300' : 'bg-blue-50 border-blue-300 text-blue-800'}`}>
+                          ℹ️ 腳本較長（約 {estMin} 分鐘），{ttsChunkingEnabled ? '將自動分段生成，投影片換頁處可能有輕微停頓感。' : '後段音質可能輕微劣化。'}
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                   <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
                   <p className={`text-[11px] leading-relaxed ${t.faint}`}>
                     也可至
@@ -1226,7 +1389,7 @@ export default function Home() {
 
         {/* ── Step 4 ── */}
         <div ref={step4Ref}>
-          <StepCard step={4} title="生成 Podcast 簡報 (AI 精準對齊)" state={step4State} disabled={!podcastBlob || !script} dark={dark}>
+          <StepCard step={4} title={isDuo ? '生成 Podcast 簡報 (AI 精準對齊)' : narrationMode === 'solo_explainer' ? '生成講解簡報（AI 精準對齊）' : '生成敘事簡報（AI 精準對齊）'} state={step4State} disabled={!podcastBlob || !script} dark={dark}>
             {step4State.status === 'loading'
               ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
               : (
@@ -1272,6 +1435,7 @@ export default function Home() {
             filename="podcast_slides.mp4"
             cachedBlob={podcastVideoBlob}
             onCached={setPodcastVideoBlob}
+            onClearCache={() => setPodcastVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
           />
@@ -1424,6 +1588,7 @@ export default function Home() {
             filename="music_slides.mp4"
             cachedBlob={musicVideoBlob}
             onCached={setMusicVideoBlob}
+            onClearCache={() => setMusicVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
           />

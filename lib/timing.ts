@@ -36,7 +36,9 @@ export async function calcPodcastTimings(
     slideTexts.push(script.slice(start, end));
   }
 
-  const totalChars = slideTexts.reduce((s, t) => s + t.length, 0);
+  // Only count chars for slides within slideCount — extra script sections beyond slideCount
+  // would dilute proportions and cause all slides to advance too early.
+  const totalChars = slideTexts.slice(0, slideCount).reduce((s, t) => s + t.length, 0);
   const timings: SlideTimings = [];
   let currentSec = 0;
 

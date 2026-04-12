@@ -41,3 +41,12 @@ TODOLIST.md
 
 # ── Design assets (已刪除但防呆) ──
 stitch_ai_creator_home_variant_1*/
+
+# ── Local planning / review docs ──
+plan*.md
+recommand*.md
+
+# ── Non-default Cloud Build configs ──
+cloudbuild_202.yaml
+cloudbuild_404.yaml
+cloudbuild_408.yaml

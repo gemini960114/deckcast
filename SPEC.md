@@ -2,6 +2,14 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v08 補充亮點（2026-04-12）：
+1. **TTS 分段生成（plan_I / plan_I01）**：新增 `TTS_CHUNKING_ENABLED` feature flag；啟用後，腳本超過 `TTS_CHUNK_CHARS`（預設 1000）字元時以投影片邊界自動切段，各段 PCM 串接後插入 800ms（`CHUNK_GAP_MS`）靜音，解決 Gemini TTS 長篇破音問題；duo 與 solo 均套用。新增 `createSilence()`、`trimLeadingSilence()`、`trimTrailingSilence()`、`concatPcmChunks()` 整條 `Uint8Array` PCM 鏈，解決 TypeScript 5.x `Buffer<ArrayBufferLike>` 型別錯誤。
+2. **TTS 自動重試**：`callTtsApi()` 對 Gemini TTS 500 系列錯誤最多重試 2 次（間隔 2 秒），4xx 錯誤直接拋出不重試。
+3. **`extractSoloScript()` 空白行修正**：solo 模式下 `Speaker 1:` 後無內容的行在 `.map()` 後加 `.filter(Boolean)`，避免空字串被 `join('\n')` 串成空白行送入 TTS，消除非預期停頓。
+4. **`calcPodcastTimings()` 比例修正**：改用 `slideTexts.slice(0, slideCount)` 計算 `totalChars`，避免腳本 `投影片` 標記數量多於 PDF 頁數時分母被稀釋，導致所有投影片提前換頁。
+5. **前端估時修正**：UI 顯示的估算分鐘數套用 `× 0.8` 校正係數，與實測結果更吻合；`TTS_CHUNKING_ENABLED=true` 時估時自動加入 chunk 間靜音（`chunkCount - 1) × 0.8s`）。
+6. **新增 `lib/ttsEstimate.ts`**：`countDialogueChars()`、`estimateTtsDuration()`、`estimateChunkCount()` 三支 UI 估算工具函式，供前端警示提示計算。
+
 ### ✨ v04 補充亮點（2026-04-06）：
 1. **精準 AI 對齊生成 (Two-step SRT) 與 `startSrtId` 契約統一**：對齊鏈已從舊版直接輸出秒數的 `vocalStartSec`，收斂為 `SRT -> startSrtId -> timings`。Phase 2 的任務是找每張投影片第一次進入時對應的字幕 id，再由程式換算轉場秒數。
 2. **Lyria 3 API 解析防呆與模型簡化**：徹底移除了 `30-second` 預設模型，目前全盤統一傳遞給 Lyria 3 Pro 模型。後端解析 response 時採用了「無序物件遍歷」，確保無論 Google API 的 `text` 或 `audio/mp3` 在 `parts` 陣列中的哪個位置全都能安全讀取。
@@ -9,9 +17,16 @@
 4. **登入與歷史紀錄隔離**：新增 invitation code + Google OAuth 雙重驗證、`AUTH_ENABLED` 開關、HMAC session token；當 `AUTH_ENABLED=true` 時，IndexedDB 歷史紀錄會依 Google email (`ownerEmail`) 隔離。
 5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-15 張**；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
 
+### ✨ v07 補充亮點（2026-04-11）：
+1. **資料一致性修正（PPTX / MP4 / SRT / timing 同步）**：`handleRepackPodcastPptx()` / `handleRepackMusicPptx()` 套用偏移後，不只更新 PPTX，還會同步將 offset 烘入 `podcastSrt` / `musicSrt`（使用 `adjustSrtTimes`），更新 `podcastTimings` / `musicTimings` state，清零 offset slider，清除 video blob 快取；IndexedDB 同步寫入 timings 與 SRT；確保 PPTX、MP4、SRT 下載三者永遠一致。
+2. **快取失效規則完整化**：`resetPodcastDerivedState()` / `resetMusicDerivedState()` 均補齊 video blob 清除；podcast reset 補上 IndexedDB 清除（與 music 路徑對稱）；`resetMusicDerivedState()` 補齊 `musicTimings` / `musicSrtOffset` 清除；音訊任何來源改變時，PPTX / SRT / timings / video 均一律清空。
+3. **VideoExportBlock `onClearCache` prop**：新增 `onClearCache: () => void`，「重新生成」按鈕改為一步完成「清 parent cache → 立即觸發重新生成」；「重試」按鈕改為直接呼叫 `handleGenerate()`，不再需要使用者多按一次主按鈕。
+4. **`loadRecord()` SRT offset 歸零**：從歷史紀錄載入專案時，`podcastSrtOffset` / `musicSrtOffset` 一律歸零，避免前一個專案的 offset 值滲入新載入的紀錄。
+5. **export-video API body 限制調整**：上限從 50MB 提升至 150MB（依 50MB 音訊 base64 後 ≈67MB + 圖片計算）；`Content-Length` 改為只在 header 存在時才做 pre-flight 檢查；新增 `rawBody` 實際 byte 計數作為真正的安全防線，修復原本 header 缺失就跳過整個檢查的 bypass 問題。
+
 ### ✨ v06 補充亮點（2026-04-10）：
 1. **MP4 影片匯出**：新增 `app/api/export-video/route.ts` + `lib/videoExport.ts`，FFmpeg xfade 淡入淡出轉場，與 PPTX `<p:fade/>` 視覺一致；並行控制（auto / 手動）；5 分鐘 timeout。
-2. **VideoExportBlock 元件**：取代舊的 `VideoExportButton`；session 內只生成一次，後續點擊直接下載快取 blob；`forceRegen` 可強制重跑；503 自動重試（最多 5 次，每次等 10 秒）。
+2. **VideoExportBlock 元件**：取代舊的 `VideoExportButton`；session 內只生成一次，後續點擊直接下載快取 blob；503 自動重試（最多 5 次，每次等 10 秒）。
 3. **xfade 提早結束修正**：xfade 消耗輸出時間軸的 bug；修正方案：最後一張投影片延長 `sum(fadeDurs) + 2.0s`，移除 `-shortest`，確保影片與音訊對齊並有 2 秒收尾靜止。
 4. **Podcast 結尾問題**：`PODCAST_PROMPT_TEMPLATE` 新增結尾規則，最後一頁由主持人拋出開放式問題 + 另一位給語境化回應；使用抽象描述避免字面範例造成 LLM 每次複製同一句話。
 5. **多規格 Cloud Run 部署**：新增 `cloudbuild_202.yaml` / `cloudbuild_404.yaml` / `cloudbuild_408.yaml` 三份設定，對應 2Gi / 4Gi / 8Gi 記憶體規格，均預設啟用影片匯出。
@@ -1513,11 +1528,12 @@ headers: { 'Content-Length': String(wavData.byteLength) }
 
 **症狀**：`npm run build` 時 `app/api/generate-podcast/route.ts` 報錯 `Type 'Uint8Array' is not assignable to type 'BodyInit'` 或 Buffer 相關轉換錯誤。
 **原因**：Next.js 在嚴格的 TypeScript 檢查下，部分 Node.js 基礎型別 (Buffer) 傳入 `NextResponse` 建構子不被允許。
-**解法**：將最終生成的 WAV 音訊包裝成標準 `Blob` 後再傳給 `NextResponse`，避免 `Uint8Array` / `ArrayBufferLike` 的型別衝突。
+**現行解法**（2026-04-11 更新）：使用 `Buffer.from(wavData.buffer, byteOffset, byteLength)` 直接傳入 `NextResponse`，避免中間 Blob 創建步驟；Node.js Buffer 在 Next.js App Router 環境下是有效的 `BodyInit`，且對大型二進位回應更可靠（不會造成 `net::ERR_FAILED 200 (OK)`）。
 ```typescript
+const pcmData = Buffer.from(audioData, 'base64');
 const wavData = pcmToWav(new Uint8Array(pcmData), sampleRate);
-const wavBody = new Blob([Uint8Array.from(wavData)], { type: 'audio/wav' });
-return new NextResponse(wavBody, { headers: { ... } });
+const wavBuffer = Buffer.from(wavData.buffer, wavData.byteOffset, wavData.byteLength);
+return new NextResponse(wavBuffer, { headers: { 'Content-Type': 'audio/wav', ... } });
 ```
 
 ---
@@ -1712,3 +1728,80 @@ gcloud run deploy deckcast \
   --project [YOUR_PROJECT_ID]
 ```
 必須先在本地端執行 `npm run build` 確認 TypeScript 檢查通過後再推送至 Cloud Run，以節省雲端建置的漫長等待時間與運算成本。
+
+## 30. 版本紀錄補充
+
+### ✨ v08 補充亮點（2026-04-11）— plan_F 三種語音表達模式
+
+#### 30.1 NarrationMode（三模式切換）
+
+新增 `NarrationMode` 型別，取代原本固定的「雙人 Podcast」設計：
+
+```ts
+export type NarrationMode = 'duo' | 'solo_explainer' | 'solo_story';
+```
+
+| 模式 | 說明 | TTS speakerVoiceConfigs |
+|------|------|-------------------------|
+| `duo` | 雙人對談（原預設） | Speaker 1 + Speaker 2 |
+| `solo_explainer` | 單人講解（教學型） | 僅 Speaker 1 |
+| `solo_story` | 單人說故事（敘事型） | 僅 Speaker 1 |
+
+#### 30.2 三套獨立 Prompt 模板
+
+`lib/prompts.ts` 廢棄單一 `PODCAST_PROMPT_TEMPLATE`，改為三套分離模板：
+
+- `DUO_PODCAST_PROMPT_TEMPLATE`：雙人，Speaker 1 / Speaker 2 交替，自然收尾（移除強制開放式問題規則）
+- `SOLO_EXPLAINER_PROMPT_TEMPLATE`：單人，Speaker 1，教學風格，穩定清晰
+- `SOLO_STORY_PROMPT_TEMPLATE`：單人，Speaker 1，敘事風格，情境鮮明
+
+dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueStyle, tone })` 依 mode 分發對應模板，取代原本的 `buildPodcastPrompt`。
+
+#### 30.3 lyricsSource 內容解耦
+
+歌詞生成不再必然使用 podcast 文稿作為輸入：
+
+| 模式 | 歌詞輸入來源 | 說明 |
+|------|-------------|------|
+| `duo` | `script`（podcast 對話稿） | 維持原有行為（⚠️ 暫時策略，雙人文稿語氣仍可能影響歌詞） |
+| `solo_explainer` | `slides`（原始投影片文字） | 直接繞過文稿，避免語氣污染 |
+| `solo_story` | `slides`（原始投影片文字） | 同上 |
+
+`generate-lyrics` route 新增 `lyricsSource` 欄位，優先於 `script` 使用。
+
+#### 30.4 TTS 實際修正（與原 plan_F 設計有出入）
+
+**原 plan_F 設計（已作廢）**：單人模式送 1 個 `speakerVoiceConfigs`。
+**實際 Gemini API 限制**：`multi_speaker_voice_config` 要求 `enabled_voices` 必須剛好等於 2，送 1 個直接回傳 400。
+
+**實際修正方案**：
+- solo 模式完全不用 `multiSpeakerVoiceConfig`，改用單聲道 `voiceConfig`：
+  ```ts
+  // duo
+  speechConfig = { multiSpeakerVoiceConfig: { speakerVoiceConfigs: [Speaker1, Speaker2] } }
+  // solo
+  speechConfig = { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice1 } } }
+  ```
+- 新增 `extractSoloScript()` 函式，solo 模式不再走 `extractDialogue()`：
+  - 提取 `風格:` 行內容作為朗讀風格指令
+  - 剝除所有 `Speaker 1:` 前綴（單聲道 TTS 不需要講者標籤）
+  - 過濾掉投影片標題行（`投影片 N：`）
+  - 組成 `Read the following script... Style: <風格>\n\nScript:\n<純台詞>` 格式送給 TTS
+
+#### 30.5 模式切換狀態失效（handleNarrationModeChange）
+
+切換模式時，`handleNarrationModeChange()` 會：
+
+1. 清除所有模式派生內容：`script`、`lyrics`、SRT、timings、diagnostics
+2. 重置 step 2–7 狀態為 `idle`
+3. **保留** `podcastBlob` / `musicBlob` / `podcastPptxBlob` / `musicPptxBlob`（已產出的音訊與簡報仍可下載）
+4. 立即呼叫 `updateRecord(recordId, { narrationMode: mode, script: undefined, ... })` 同步寫入 IndexedDB
+
+`loadRecord()` 直接呼叫 `setNarrationMode(rec.narrationMode ?? 'duo')`，不通過 handler，避免重複觸發 IndexedDB 寫入循環。
+
+#### 30.6 模式感知 UI
+
+- Step 0 新增三按鈕切換列（雙人對談 / 單人講解 / 單人說故事）
+- 雙人模式顯示 Speaker 2 描述欄位與 Voice 2 選擇；單人模式隱藏
+- Step 2 / 3 / 4 標題與 loading 訊息依模式動態調整
+- `GenerationRecord` 新增 `narrationMode?: NarrationMode` 欄位，隨專案存入 IndexedDB

@@ -46,3 +46,7 @@ desktop.ini
 
 # ── Vercel ──
 .vercel
+
+# ── Local planning / review docs (not for repo) ──
+plan*.md
+recommand*.md

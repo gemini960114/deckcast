@@ -1,4 +1,5 @@
 import { DEFAULT_SPEAKER1, DEFAULT_SPEAKER2, DEFAULT_DIALOGUE_STYLE, DEFAULT_TONE } from './constants';
+import type { NarrationMode } from './types';
 
 export const GENERATE_MUSIC_SRT = `
 你將收到兩種資料：
@@ -171,14 +172,15 @@ export const PARSE_PDF_PROMPT =
   '投影片 1: [內容]\n投影片 2: [內容]\n' +
   '以此類推，每張投影片的內容要完整詳細。純文字輸出，不使用任何 Markdown 符號。';
 
-// ===== Podcast Prompts =====
-export const PODCAST_PROMPT_TEMPLATE = (vars: {
+// ===== Narration Prompts (F: three-mode system) =====
+
+export const DUO_PODCAST_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
   speaker2: string;
   dialogueStyle: string;
   tone: string;
 }) =>
-  `我想製作一個 podcast 節目，介紹以下每一張投影片內容。
+  `我想製作一個雙人對談節目，介紹以下每一張投影片內容。
 每張投影片請產出約 30 秒至 60 秒的對話腳本，並依照內容複雜度自然調整長度。
 
 設定如下：
@@ -188,37 +190,138 @@ export const PODCAST_PROMPT_TEMPLATE = (vars: {
 - 節目基調：${vars.tone}
 
 【極度重要的格式規定】
-無論兩位主持人的名字叫什麼，講話前方的「發言者標籤」必須且只能使用 "Speaker 1:" 與 "Speaker 2:"！絕對不可以使用角色的名字作為標籤！這是為了配合後端的語音合成引擎，如果有任何其他標籤系統會全面崩潰。
+無論兩位主持人的名字叫什麼，講話前方的發言者標籤必須且只能使用 "Speaker 1:" 與 "Speaker 2:"。
+絕對不可以使用角色名字作為標籤。
 
 請嚴格依照以下格式輸出：
 
-\`\`\`
-風格: [請依據投影片內容的主題與氛圍，產生適合的朗讀風格說明]
+風格: [請依據內容產生適合的朗讀風格說明]
 
 投影片 1：[標題]
 Speaker 1: [台詞內容，可以在台詞內自稱名字]
 Speaker 2: [台詞內容...]
 Speaker 1: [台詞內容...]
 [視內容繼續對話]
-\`\`\`
 
-【錯誤範例】（絕對不可這樣寫）：
-阿哲: 歡迎收聽...
-Mary老師: 哈哈，問題問得好...
+每張投影片請分段呈現。
 
-【正確範例】：
-Speaker 1: 歡迎收聽...
-Speaker 2: 哈哈，問題問得好...
+【結尾要求】
+最後一張投影片請自然收束，不要突然中斷。
+收尾方式可依內容需要自然選擇：
+- 一句總結
+- 一句共鳴
+- 一句驚嘆
+- 若主題適合，也可用一個開放式問題作結
 
-每張投影片請分段呈現。`.trim();
+不要加「感謝收聽」或制式節目尾句。`.trim();
 
-export function buildPodcastPrompt(vars: {
+export const SOLO_EXPLAINER_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
-  speaker2: string;
   dialogueStyle: string;
   tone: string;
-}) {
-  return PODCAST_PROMPT_TEMPLATE(vars);
+}) =>
+  `我想製作一段單人講解音訊，依序介紹以下每一張投影片內容。
+每張投影片請產出約 30 秒至 60 秒的單人講解腳本，並依照內容複雜度自然調整長度。
+
+設定如下：
+- 講者人設：${vars.speaker1}
+- 講解風格：${vars.dialogueStyle}
+- 整體基調：${vars.tone}
+
+【極度重要的格式規定】
+請使用單一講者格式，不要生成對話，不要出現第二角色。
+講話前方的標籤請固定使用 "Speaker 1:"。
+
+請嚴格依照以下格式輸出：
+
+風格: [請依據內容產生適合的朗讀風格說明]
+
+投影片 1：[標題]
+Speaker 1: ...
+
+投影片 2：[標題]
+Speaker 1: ...
+
+每張投影片請分段呈現。
+
+【寫作要求】
+- 以清楚、穩定、條理分明的方式講解
+- 避免不必要的自問自答
+- 避免過度表演化的語氣
+- 內容要像專業講者在解說，而不是主持人聊天
+
+【結尾要求】
+最後一張投影片請自然收束，不要突然中斷。
+優先用一句總結、收束重點或平穩落點作結。
+不要強制拋問題，也不要加「感謝收聽」這類制式結尾。`.trim();
+
+export const SOLO_STORY_PROMPT_TEMPLATE = (vars: {
+  speaker1: string;
+  dialogueStyle: string;
+  tone: string;
+}) =>
+  `我想製作一段單人敘事音訊，依序介紹以下每一張投影片內容。
+每張投影片請產出約 30 秒至 60 秒的單人敘事腳本，並依照內容複雜度自然調整長度。
+
+設定如下：
+- 敘事者人設：${vars.speaker1}
+- 敘事風格：${vars.dialogueStyle}
+- 整體基調：${vars.tone}
+
+【極度重要的格式規定】
+請使用單一講者格式，不要生成對話，不要出現第二角色。
+講話前方的標籤請固定使用 "Speaker 1:"。
+
+請嚴格依照以下格式輸出：
+
+風格: [請依據內容產生適合的朗讀風格說明]
+
+投影片 1：[標題]
+Speaker 1: ...
+
+投影片 2：[標題]
+Speaker 1: ...
+
+每張投影片請分段呈現。
+
+【寫作要求】
+- 可以有畫面感、節奏感與情境鋪陳
+- 可以更口語、更流動，但不要變成雙人對話
+- 適合導讀、故事、人物、歷史脈絡或敘事型介紹
+
+【結尾要求】
+最後一張投影片請自然收束，不要突然中斷。
+優先用一句有餘韻的敘事、感受或畫面落點收尾。
+若主題非常適合，也可保留少量留白，但不要固定用開放式提問，也不要加制式結尾。`.trim();
+
+export function buildNarrationPrompt(params: {
+  mode: NarrationMode;
+  speaker1: string;
+  speaker2?: string;
+  dialogueStyle: string;
+  tone: string;
+}): string {
+  switch (params.mode) {
+    case 'duo':
+      return DUO_PODCAST_PROMPT_TEMPLATE({
+        speaker1: params.speaker1,
+        speaker2: params.speaker2 ?? DEFAULT_SPEAKER2,
+        dialogueStyle: params.dialogueStyle,
+        tone: params.tone,
+      });
+    case 'solo_explainer':
+      return SOLO_EXPLAINER_PROMPT_TEMPLATE({
+        speaker1: params.speaker1,
+        dialogueStyle: params.dialogueStyle,
+        tone: params.tone,
+      });
+    case 'solo_story':
+      return SOLO_STORY_PROMPT_TEMPLATE({
+        speaker1: params.speaker1,
+        dialogueStyle: params.dialogueStyle,
+        tone: params.tone,
+      });
+  }
 }
 
 // ===== Lyrics Prompts =====

@@ -6,5 +6,6 @@ export async function GET() {
     localLlmEnabled: isLocalLlmConfigured(),
     localLlmLabel: getLocalLlmLabel(),
     videoExportEnabled: process.env.VIDEO_EXPORT_ENABLED === 'true',
+    ttsChunkingEnabled: process.env.TTS_CHUNKING_ENABLED === 'true',
   });
 }

@@ -18,7 +18,7 @@
 6. 生成或上傳歌曲音訊
 7. 呼叫 AI 將歌曲音訊精準對齊成同步簡報
 
-所有生成結果可逐一下載，簡報播放時與音訊同步啟動即可對齊；也支援下載 SRT 與手動微調 offset 後重新封裝 PPTX。
+所有生成結果可逐一下載，簡報播放時與音訊同步啟動即可對齊；也支援下載 SRT 與手動微調 offset 後重新封裝 PPTX，套用後 SRT 時間戳、PPTX 轉場與 MP4 影片均會同步更新。
 
 ---
 
@@ -30,11 +30,13 @@
 - 解析完成後顯示投影片清單供確認
 
 ### Podcast 文稿生成
-- 雙人對話格式（Speaker 1 / Speaker 2）
-- 每張投影片約 30–60 秒對話量，並依照內容複雜度自然調整長度
-- 可自訂說話者角色、對話形式與語氣風格
-- 對話輪數依內容自然決定
-- 最後一張投影片結尾會由兩位主持人共同拋出一個開放式問題，讓聽眾帶著思考離開（問題與語境每次自然生成，不使用固定套話）
+- 支援三種語音表達模式，可在 Step 0 選擇：
+  - **雙人對談（duo）**：Speaker 1 / Speaker 2 交替，自然收尾（原預設）
+  - **單人講解（solo_explainer）**：僅 Speaker 1，教學風格，清晰穩定
+  - **單人說故事（solo_story）**：僅 Speaker 1，敘事風格，情境鮮明
+- 每張投影片約 30–60 秒內容量，並依照模式與複雜度自然調整長度
+- 可自訂說話者角色（單人模式僅 Speaker 1）、對話形式與語氣風格
+- 切換模式時，文稿與後續歌詞／SRT／timings 會自動清除，避免舊模式內容殘留
 
 ### 歌詞生成（14 種風格可選）
 - 嚴格依照投影片段落順序編排
@@ -68,10 +70,12 @@
 
 ### Podcast 音訊生成
 - 使用 Gemini Multi-speaker TTS
-- Speaker 1 / 2 各自對應不同聲音（可於設定選擇）
+- 雙人模式：Speaker 1 / 2 各自對應不同聲音（可於設定選擇）
+- 單人模式：僅使用 Speaker 1 聲音，TTS payload 自動調整為單聲道設定
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
 - 下載時會保留與原始 blob 相符的副檔名
 - 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
+- **TTS 分段生成**（需啟用 `TTS_CHUNKING_ENABLED=true`）：長篇腳本（duo / solo 均支援）以投影片邊界自動切段、分次呼叫 TTS，再將各段 PCM 串接並插入 800ms 靜音；解決 Gemini TTS 長段破音問題。每段字數上限由 `TTS_CHUNK_CHARS`（預設 1000）控制，切段失敗時最多自動重試 2 次
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
@@ -85,7 +89,9 @@
 - 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
 - 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
-- 同一 session 內只生成一次，生成後快取於瀏覽器記憶體，可多次下載而不重跑 FFmpeg
+- 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg
+- 點選「重新生成」會立即清除快取並重新合成；「重試」在錯誤後也會直接重跑，無需再次手動點擊
+- 以下情況會自動清除影片快取（需重新匯出）：重新生成或上傳音訊、重跑 Step 4 / Step 7 PPTX 對齊、套用偏移至轉場、載入歷史紀錄或開新專案
 - 需要 `VIDEO_EXPORT_ENABLED=true` 及容器內安裝 FFmpeg（Dockerfile 已內建）
 - 本地 Windows 開發時需額外設定 `VIDEO_FFMPEG_BIN` 指向 FFmpeg bin 目錄
 
@@ -151,7 +157,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 下載所有檔案
 ```
 
-每個步驟完成後才解鎖下一步。可重新生成單一步驟而不影響其他步驟，也可在對齊完成後調整 SRT offset 再重新封裝 PPTX。
+每個步驟完成後才解鎖下一步。可重新生成單一步驟而不影響其他步驟，也可在對齊完成後調整 SRT offset 再重新封裝 PPTX。套用偏移後，PPTX、SRT 時間戳與 MP4 影片快取會同步更新，offset slider 歸零，確保三者保持一致。
 
 ---
 
@@ -163,23 +169,33 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 - 不會傳送至伺服器儲存
 - 可從 [Google AI Studio API Keys](https://aistudio.google.com/api-keys) 取得
 
+### 語音表達模式
+
+| 模式 | 說明 |
+|---|---|
+| 雙人對談 | Speaker 1 + Speaker 2 交替（原預設） |
+| 單人講解 | 僅 Speaker 1，教學風格 |
+| 單人說故事 | 僅 Speaker 1，敘事風格 |
+
+切換模式會清除已產生的文稿、歌詞與對齊資料；已下載的音訊與簡報不受影響。
+
 ### Podcast 文稿變數
 
-| 欄位 | 預設值 |
-|---|---|
-| Speaker 1 描述 | 男生為節目主持人 |
-| Speaker 2 描述 | 女生為高師大的老師 Mary 老師（具教學經驗，說明清楚） |
-| 對話形式 | 採自然流暢的對話形式，具有節目感與互動感 |
-| 語氣風格 | 語氣親切、易懂，適合一般聽眾 |
+| 欄位 | 預設值 | 說明 |
+|---|---|---|
+| Speaker 1 描述 | 男生為節目主持人 | 三種模式均使用 |
+| Speaker 2 描述 | 女生為高師大的老師 Mary 老師（具教學經驗，說明清楚） | 僅雙人模式顯示 |
+| 對話形式 | 採自然流暢的對話形式，具有節目感與互動感 | |
+| 語氣風格 | 語氣親切、易懂，適合一般聽眾 | |
 
 欄位留空時自動套用預設值。
 
 ### TTS 聲音選擇
 
-| 角色 | 預設 | 可選 |
-|---|---|---|
-| Speaker 1 | Zephyr（Male） | Zephyr / Charon / Fenrir / Orus |
-| Speaker 2 | Puck（Female） | Puck / Kore / Leda / Aoede |
+| 角色 | 預設 | 可選 | 顯示條件 |
+|---|---|---|---|
+| Speaker 1 | Zephyr（Male） | Zephyr / Charon / Fenrir / Orus | 所有模式 |
+| Speaker 2 | Puck（Female） | Puck / Kore / Leda / Aoede | 僅雙人模式 |
 
 ### 模型選擇
 
@@ -304,6 +320,9 @@ VIDEO_MAX_CONCURRENT=0
 VIDEO_FFMPEG_PRESET=veryfast
 # Windows 本地開發：指向 ffmpeg.exe 所在目錄（Linux/Docker 留空即可）
 VIDEO_FFMPEG_BIN=C:\path\to\ffmpeg\bin
+
+# TTS 分段生成（解決長篇破音）
+TTS_CHUNKING_ENABLED=false
 ```
 
 說明：
@@ -316,6 +335,7 @@ VIDEO_FFMPEG_BIN=C:\path\to\ffmpeg\bin
 - `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4 31B (Custom)`
 - `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出功能；需同時設定 `NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true`（build-time）
 - `VIDEO_FFMPEG_BIN` 僅 **Windows 本地開發** 時需要，填入 ffmpeg.exe 所在目錄；Linux / Docker / Cloud Run 留空，程式直接呼叫系統 `ffmpeg`
+- `TTS_CHUNKING_ENABLED=true` 啟用 TTS 分段生成，解決長篇腳本破音問題；`false` 為現況行為（不分段）。Cloud Run 部署時透過 `_TTS_CHUNKING_ENABLED` substitution 傳入
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---

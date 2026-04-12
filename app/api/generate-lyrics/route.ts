@@ -8,13 +8,15 @@ import { generateText } from '@/lib/llm';
 
 export async function POST(req: NextRequest) {
   try {
-    const { script, styleId, duration = DEFAULT_LYRICS_DURATION, textModel } = await req.json();
+    const { script, lyricsSource, styleId, duration = DEFAULT_LYRICS_DURATION, textModel } = await req.json();
+    // lyricsSource takes priority: solo modes pass slides text to avoid mode-script tone pollution
+    const content = (lyricsSource ?? script) as string;
     const styleLabel = MUSIC_STYLES.find((s) => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
     const stylePrompt = buildLyricsPrompt(styleLabel, duration);
 
     const raw = await generateText(req, {
       model: textModel,
-      prompt: `${stylePrompt}\n\n${script}`,
+      prompt: `${stylePrompt}\n\n${content}`,
     });
     const lyrics = stripMarkdown(raw);
     if (!lyrics.trim()) {

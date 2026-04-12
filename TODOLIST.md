@@ -99,3 +99,92 @@
 - [x] **新增多規格 Cloud Run 部署檔**：`cloudbuild_202.yaml`（2Gi/2CPU）、`cloudbuild_404.yaml`（4Gi/4CPU）、`cloudbuild_408.yaml`（8Gi/4CPU），三份均預設啟用 VIDEO_EXPORT_ENABLED
 - [x] **補充 `VIDEO_FFMPEG_BIN`**（`.env.example`）：本地 Windows 開發用，Docker / Cloud Run 留空
 - [x] **新增 `instrumentation.ts`**：伺服器啟動時自動清理 `/tmp/video-export` 殘留目錄
+
+## 9. 2026-04-11 plan_E 完成項目（資料一致性、VideoExportBlock API、Prompt 補齊）
+
+### 9.1 Phase 1 — 資料一致性修正（`app/page.tsx`）
+- [x] **`resetPodcastDerivedState()` 補齊 video blob 清除**：加入 `setPodcastVideoBlob(null)`，確保重新生成或上傳音訊時影片快取一併失效
+- [x] **`resetPodcastDerivedState()` 補齊 IndexedDB 清除**：補入 `updateRecord` 呼叫，清除 `podcastPptxBlob / podcastSrt / podcastDiagnostics / podcastTimings`，與 music 路徑對稱
+- [x] **`resetMusicDerivedState()` 補齊三項清除**：補入 `setMusicTimings(null)` / `setMusicSrtOffset(0)` / `setMusicVideoBlob(null)`，並在 IndexedDB 更新加入 `musicTimings: undefined`
+- [x] **`handleRepackPodcastPptx()` 重構**：套用偏移後同步更新 `podcastTimings`（以 newTimings 取代原始值）、將 offset 烘入 `podcastSrt`（使用 `adjustSrtTimes`）、清零 `podcastSrtOffset`、清除 `podcastVideoBlob`；IndexedDB 同步寫入 `podcastTimings` 與 `podcastSrt`
+- [x] **`handleRepackMusicPptx()` 重構**：與 Podcast 路徑對稱，修正內容相同
+
+### 9.2 Phase 2 — VideoExportBlock API 修正
+- [x] **新增 `onClearCache` prop**（`VideoExportBlockProps`）：`() => void`，讓元件能通知 parent 清除 cachedBlob
+- [x] **「重新生成」按鈕改為單步驟**：點擊後依序呼叫 `onClearCache()` → `setForceRegen(true)` → `handleGenerate()`，不再需要使用者再次手動點擊下載按鈕
+- [x] **「重試」按鈕直接重跑**：改為呼叫 `handleGenerate()`，`handleGenerate()` 內部會自行 reset status，不需在外部先 reset
+- [x] **`app/page.tsx` 兩個 `<VideoExportBlock>` 補入 `onClearCache` prop**：分別傳入 `() => setPodcastVideoBlob(null)` 與 `() => setMusicVideoBlob(null)`
+
+### 9.3 Phase 2 補充 — `loadRecord()` SRT offset 歸零
+- [x] **`loadRecord()` 補齊 offset 重置**：加入 `setPodcastSrtOffset(0); setMusicSrtOffset(0);`，避免前一個專案的 offset 值在切換歷史紀錄時滲入新載入的紀錄
+
+### 9.4 Phase 3 — Prompt 補齊與 API body 限制修正
+- [x] **補入 Podcast 收尾規則**（`lib/prompts.ts` `PODCAST_PROMPT_TEMPLATE`）：補回 `plan_D_done.md` 記載但未寫入程式的最終版本；要求最後一頁由主持人拋出開放式問題，另一位給一句語境化收尾，不可使用固定套話
+- [x] **export-video API body 上限調整**（`app/api/export-video/route.ts`）：從 50MB 提升至 150MB，對應 50MB 音訊 base64 後 ≈67MB + 圖片的實際需求
+- [x] **修正 Content-Length bypass**：原本若 header 缺失則 `parseInt('0') = 0`，完全繞過大小限制；改為 header 存在才做 pre-flight 檢查，並額外新增 `rawBody` 實際 byte 計數作為真正防線
+
+## 10. 2026-04-11 plan_F 完成項目（三種語音表達模式）
+
+### 10.1 F1 — 模式切換骨架（`lib/types.ts`、`app/page.tsx`）
+- [x] **新增 `NarrationMode` 型別**（`lib/types.ts`）：`'duo' | 'solo_explainer' | 'solo_story'`
+- [x] **`GenerationRecord` 新增 `narrationMode?: NarrationMode`**：隨專案存入 IndexedDB
+- [x] **`narrationMode` state**（`app/page.tsx`）：`useState<NarrationMode>('duo')`
+- [x] **`isDuo` 與 `lyricsSource` derived values**：`isDuo = narrationMode === 'duo'`；`lyricsSource = isDuo ? script : slides`
+- [x] **三按鈕切換列 UI**（Step 0）：雙人對談 / 單人講解 / 單人說故事
+- [x] **模式感知欄位顯示**：Speaker 2 描述與 Voice 2 選擇在單人模式下隱藏
+- [x] **模式感知動態標題**：Step 2 / 3 標題與 loading 訊息依模式切換
+
+### 10.2 F2 — Prompt 模板重構（`lib/prompts.ts`、`app/api/generate-script/route.ts`、`app/api/generate-lyrics/route.ts`）
+- [x] **廢棄 `PODCAST_PROMPT_TEMPLATE` / `buildPodcastPrompt`**，改為三套獨立模板
+- [x] **`DUO_PODCAST_PROMPT_TEMPLATE`**：雙人，移除強制開放式問題規則，改為自然收尾
+- [x] **`SOLO_EXPLAINER_PROMPT_TEMPLATE`**：單人 Speaker 1，教學風格
+- [x] **`SOLO_STORY_PROMPT_TEMPLATE`**：單人 Speaker 1，敘事風格
+- [x] **`buildNarrationPrompt()` dispatcher**：依 mode 分發模板
+- [x] **`generate-script` route 接收 `narrationMode`**，改用 `buildNarrationPrompt`
+- [x] **`generate-lyrics` route 新增 `lyricsSource` 欄位**：solo 模式傳入 `slides`，duo 傳入 `script`
+
+### 10.3 F3 — TTS 修正（`app/api/generate-podcast/route.ts`）
+- [x] **`generate-podcast` route 接收 `narrationMode`**
+- [x] **修正 Gemini API 限制**：`multiSpeakerVoiceConfig` 要求剛好 2 個 config，原先送 1 個造成 400；solo 模式改用單聲道 `voiceConfig`，完全不走 `multiSpeakerVoiceConfig` 路徑
+- [x] **新增 `extractSoloScript()`**：solo 模式專用；提取 `風格:` 作為朗讀指令、剝除 `Speaker 1:` 前綴、過濾投影片標題行，組成 TTS 友善 prompt 格式
+- [x] **`extractDialogue()` 維持 duo 專用**：`/^Speaker\s+\d+/i` 正規式邏輯不變
+- [x] **WAV 回應改用 `Buffer`**：移除中間 `Blob` 包裝層，直接 `Buffer.from(wavData.buffer, ...)` 傳入 `NextResponse`，解決大型音訊 `net::ERR_FAILED 200 (OK)` 問題
+
+### 10.4 補充修正 1 — 模式切換後游離狀態清除（`app/page.tsx`）
+- [x] **`handleNarrationModeChange()` 清除下游 state**：`script`、`lyrics`、SRT、timings、diagnostics、step 2–7 狀態
+- [x] **保留 blob**：`podcastBlob` / `musicBlob` / `podcastPptxBlob` / `musicPptxBlob` 不清除，已產出資產仍可下載
+- [x] **`saveRecord` / `handleGenerateScript` 傳遞 `narrationMode`**
+
+### 10.5 補充修正 2 — narrationMode IndexedDB 即時持久化（`app/page.tsx`）
+- [x] **`handleNarrationModeChange()` 立即呼叫 `updateRecord()`**：切換當下同步寫入 IndexedDB，不依賴 useEffect 延遲
+- [x] **`loadRecord()` 直接 `setNarrationMode()`**：不通過 handler，避免觸發不必要的 DB 寫入循環
+
+## 11. 2026-04-12 plan_I / plan_I01 完成項目（TTS 分段生成與品質修正）
+
+### 11.1 TTS 分段生成核心（`app/api/generate-podcast/route.ts`、`lib/constants.ts`）
+- [x] **`TTS_CHUNKING_ENABLED` feature flag**：server-side `process.env.TTS_CHUNKING_ENABLED === 'true'` 控制，`false` 維持現況不分段；duo / solo 均套用
+- [x] **`TTS_CHUNK_CHARS = 1000`**：每段台詞字數上限（≈ 4–5 分鐘），以投影片邊界為優先切點
+- [x] **`CHUNK_GAP_MS = 800`**：chunk 間插入固定靜音（ms），作為常數方便調整
+- [x] **`splitScriptIntoChunks()`**：兩層切分邏輯；Layer 1 以 `投影片 N：` 邊界切分並累積字數，Layer 2 在單頁超長時以 Speaker 行細切，單行超長則拋出 `CHUNK_TOO_LONG` 400 錯誤
+- [x] **`createSilence(durationMs, sampleRate): Uint8Array`**：生成全零 Int16 LE PCM 靜音段
+- [x] **`trimLeadingSilence()` / `trimTrailingSilence()`**：DataView + `pcm.byteOffset` 正確讀取 Int16，裁切段首冷啟動靜音與段尾死靜音
+- [x] **`concatPcmChunks()`**：串接所有 Uint8Array PCM 段
+- [x] **整條 PCM 鏈使用 `Uint8Array`**：規避 TypeScript 5.x `Buffer<ArrayBufferLike>` 不可賦值給 `BodyInit` 的編譯錯誤；`makeWavResponse()` 以 `wavData.buffer as ArrayBuffer` 傳入 `NextResponse`
+- [x] **multi-chunk 迴圈**：每段 push PCM 後（非末段）插入靜音；前段 trim 尾部、後段 trim 頭部，使接縫更自然
+- [x] **`callTtsApi()` 自動重試**：500 系列最多重試 2 次、間隔 2 秒；4xx / auth 錯誤直接拋出
+
+### 11.2 前端估時與警示（`app/page.tsx`、`lib/ttsEstimate.ts`）
+- [x] **新增 `lib/ttsEstimate.ts`**：`countDialogueChars()`、`estimateTtsDuration()`、`estimateChunkCount()` 三支工具函式，供 UI 估算使用
+- [x] **Step 3 估時公式**：`estSec = speechSec + (ttsChunkingEnabled ? (chunkCount-1) × 0.8 : 0)`；`estMin = Math.ceil(estSec × 0.8 / 60)`（實測約為估算值 80%）
+- [x] **`ttsChunkingEnabled` runtime state**：從 `/api/runtime-config` 讀取，供 UI 判斷是否顯示 chunk 停頓警示
+
+### 11.3 投影片時間軸修正（`lib/timing.ts`）
+- [x] **`calcPodcastTimings()` 比例修正**：改用 `slideTexts.slice(0, slideCount).reduce(...)` 計算 `totalChars`，避免腳本 `投影片` 標記數多於 PDF 頁數時分母稀釋，導致所有投影片換頁提前
+
+### 11.4 solo 逐字稿空白行修正（`app/api/generate-podcast/route.ts`）
+- [x] **`extractSoloScript()` 加 `.filter(Boolean)`**：`Speaker 1:` 後無內容的行經 `.map()` 後產生空字串，加 filter 後不再送入 TTS，消除不預期停頓
+
+### 11.5 設定檔與部署（`.env.example`、`cloudbuild.yaml`、`docker-compose.yml`）
+- [x] **`.env.example` 新增 `TTS_CHUNKING_ENABLED=false`**：附說明，方便新部署者了解用途
+- [x] **`cloudbuild.yaml` / `cloudbuild_202/404/408.yaml` 新增 `TTS_CHUNKING_ENABLED`**：以 `_TTS_CHUNKING_ENABLED` substitution 傳入；預設 `false`，需手動帶入啟用
+- [x] **`docker-compose.yml` 新增 `TTS_CHUNKING_ENABLED`**：`${TTS_CHUNKING_ENABLED:-false}` 從 `.env.local` 讀取
