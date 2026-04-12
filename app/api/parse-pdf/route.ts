@@ -3,9 +3,11 @@ import { getGeminiAI, unauthorizedResponse } from '@/lib/getAI';
 import { stripMarkdown } from '@/lib/stripMarkdown';
 import { DEFAULT_MULTIMODAL_MODEL, resolveStep41Model } from '@/lib/constants';
 import { PARSE_PDF_PROMPT } from '@/lib/prompts';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 
 export async function POST(req: NextRequest) {
   try {
+    logUsage(getEmailFromRequest(req), 'parse-pdf');
     const ai = getGeminiAI(req);
     const { pdf, multimodalModel, textModel } = await req.json() as { pdf: string; multimodalModel?: string; textModel?: string };
     const modelName = resolveStep41Model(multimodalModel ?? textModel ?? DEFAULT_MULTIMODAL_MODEL);

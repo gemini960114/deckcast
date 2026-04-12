@@ -16,6 +16,7 @@ import {
 import type { AlignMusicDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 import { generateText } from '@/lib/llm';
 
 export const maxDuration = 300;
@@ -205,6 +206,7 @@ async function generateMusicSrtWithGemini(params: {
 
 export async function POST(req: NextRequest) {
   try {
+    logUsage(getEmailFromRequest(req), 'align-music');
     const {
       lyrics,
       audioBase64,

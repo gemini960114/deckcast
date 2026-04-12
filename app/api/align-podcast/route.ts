@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getGeminiAI, unauthorizedResponse } from '@/lib/getAI';
 import { DEFAULT_STEP41_MODEL, isGeminiModel, resolveStep41Model, resolveTextModel } from '@/lib/constants';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 import { FIND_PODCAST_TRANSITIONS_PROMPT, GENERATE_PODCAST_SRT, REFINE_PODCAST_SRT_TEXT_PROMPT } from '@/lib/prompts';
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
@@ -135,6 +136,7 @@ async function generatePodcastSrtWithGemini(params: {
 
 export async function POST(req: NextRequest) {
   try {
+    logUsage(getEmailFromRequest(req), 'align-podcast');
     // Vercel / Cloud Run 預設 NextRequest 對於 body size 在 standalone runtime 相對寬鬆，
     // 但為避免超過預設 JSON parse 上限，通常建議從前端直傳 base64 字串配合前端限流。
     const { script, audioBase64, audioMimeType, textModel, step41Model, step42Model, contentLanguage } = await req.json();

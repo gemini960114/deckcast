@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { getMusicModel } from '@/lib/constants';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 
 export const maxDuration = 300;
 
 export async function POST(req: NextRequest) {
   try {
+    logUsage(getEmailFromRequest(req), 'generate-music');
     const ai = getAI(req);
     const { lyrics, duration, musicModel, contentLanguage } = await req.json();
     console.log(`[generate-music] contentLanguage=${contentLanguage ?? 'zh-TW'}`);

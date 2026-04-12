@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel, TTS_CHUNK_CHARS, CHUNK_GAP_MS } from '@/lib/constants';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 
 export const maxDuration = 600;
 
@@ -268,6 +269,7 @@ async function callTtsApi(
 
 export async function POST(req: NextRequest) {
   try {
+    logUsage(getEmailFromRequest(req), 'generate-podcast');
     const ai = getAI(req);
     const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo', contentLanguage } = await req.json();
     const modelName = resolveTtsModel(ttsModel);

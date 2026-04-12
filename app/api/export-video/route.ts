@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isRequestAuthError, requireSession, unauthorizedResponse } from '@/lib/auth';
+import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 import {
   generateVideo,
   getActiveExports,
@@ -25,6 +26,7 @@ interface ExportVideoRequest {
 }
 
 export async function POST(req: NextRequest) {
+  logUsage(getEmailFromRequest(req), 'export-video');
   // 1. Feature gate
   if (!isVideoExportEnabled()) {
     return NextResponse.json(
