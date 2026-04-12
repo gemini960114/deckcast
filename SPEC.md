@@ -2,6 +2,13 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v11 補充亮點（2026-04-12，部署與維運強化）：
+1. **cloudbuild 版本 tag 支援**：`cloudbuild.yaml` 與 `cloudbuild_500.yaml` 均改為同時 build / push / deploy `:latest` 與 `:${_IMAGE_TAG}` 兩個 tag；預設 `_IMAGE_TAG=manual`，可由 CLI `--substitutions` 覆蓋為 `manual-YYYYMMDDHHMI` 格式，方便回溯與回滾。
+2. **Cloud Run 最小可用資源明確化**（`cloudbuild.yaml`）：新增 `--cpu=1`、`--concurrency=10`、`--min-instances=0`、`--max-instances=10`；記憶體從 `512Mi` 調整為 `1Gi`（Node.js + LLM 串流安全最低值）；`cloudbuild_500.yaml` 對應調整為 CPU=2 / Memory=4Gi / Concurrency=4 / Min=1，並加入 `--cpu-boost`。
+3. **nginx SSL 反向代理**（自架伺服器）：新增 `nginx/default.conf` 與 `docker-compose.yml` nginx service；HTTP 自動 redirect 到 HTTPS；`proxy_buffering off` 確保 LLM streaming 不卡；`client_max_body_size 60M`；`ssl/cert.pem` + `ssl/key.pem` 放專案根目錄即可啟用。
+4. **FFmpeg CPU 執行緒限制**（`lib/videoExport.ts`）：新增 `getFFmpegThreads()`，預設 `min(2, cpuCount)`；FFmpeg args 加入 `-threads N` 與 `-filter_threads N`（後者覆蓋 xfade filter graph 執行緒，global `-threads` 管不到）；可由 `VIDEO_FFMPEG_THREADS` env var 覆蓋，`=0` 不限制。
+5. **使用量記錄**（`lib/usageLogger.ts`）：新增 `logUsage(email, action)` — 永遠寫 stdout（Cloud Run → Cloud Logging）；`LOG_FILE_PATH` 設定時額外 append JSON Lines 至檔案（Docker volume 持久化）；已接入全部 8 個主要 API route（`parse-pdf` / `generate-script` / `generate-lyrics` / `generate-podcast` / `generate-music` / `align-podcast` / `align-music` / `export-video`）。
+
 ### ✨ v10 補充亮點（2026-04-12，plan_J1 + 品質修正）：
 1. **Whisper 多語對齊修正（plan_J1）**：`lib/whisper.ts` 新增 `mapContentLanguageToWhisperLanguage()`（`zh-TW→zh / en→en / ja→ja / ko→ko`），並移除原本隱藏的 `|| 'zh'` fallback（改為有值才 append language，否則讓 Whisper auto-detect）；`align-podcast/route.ts` 與 `align-music/route.ts` 接收 `contentLanguage` 並透過 mapping 傳給 Whisper，不再寫死 `'zh'`；`app/page.tsx` Step 4 / Step 7 的 align API request body 補傳 `contentLanguage`，確保多語專案的對齊鏈完整。
 2. **`loadRecord()` 殘留狀態修正**：`app/page.tsx` 的 `loadRecord()` 對所有 blob（`pdfFile` / `podcastBlob` / `podcastPptxBlob` / `musicBlob` / `musicPptxBlob`）、step states（Step 1~7）、以及 speaker / voice / dialogueStyle / tone 欄位均補上 `else` 清空邏輯；載入不完整 record 時不再殘留前一個專案的狀態。

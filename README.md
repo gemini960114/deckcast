@@ -445,11 +445,10 @@ nginx 會自動接管 80 / 443，HTTP 請求會自動 redirect 到 HTTPS。
 - 在 Cloud Run deploy 時帶入 auth、Whisper 與本地 OpenAI-compatible LLM 所需的 runtime env vars
 
 若你要部署較高承載版本，也可以改用 [cloudbuild_500.yaml](./cloudbuild_500.yaml)。這份設定會額外指定：
-- `deckcast500` 作為獨立 Cloud Run 服務名稱
-- `CPU=4`
+- `CPU=2`、`--cpu-boost`
 - `Memory=4Gi`
-- `Concurrency=8`
-- `Min instances=3`
+- `Concurrency=4`
+- `Min instances=1`
 - `Max instances=60`
 
 #### 部署步驟
@@ -483,8 +482,8 @@ gcloud builds submit --config cloudbuild_500.yaml "--substitutions=_IMAGE_TAG=ma
 - `NEXT_PUBLIC_AUTH_ENABLED`、`NEXT_PUBLIC_GOOGLE_CLIENT_ID` 屬於前端 build-time 變數；請透過 Cloud Build substitutions 或其他建置環境變數在 build 時注入
 - `cloudbuild.yaml` 內建的是可直接使用的預設值；正式部署前務必以 substitutions 覆蓋 `change-me` 類型參數
 - `LOCAL_LLM_BASE_URL` 若填到 `/v1`，程式會自動補成 `/chat/completions`；若你已直接提供完整的 `/chat/completions` 端點，也可以直接使用
-- `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出；`cloudbuild.yaml` 預設為 `false`，需手動帶入 substitution。`cloudbuild_202.yaml` / `cloudbuild_404.yaml` / `cloudbuild_408.yaml` 預設已啟用
-- `_MEMORY` 在 `cloudbuild.yaml` 預設為 `512Mi`，啟用影片匯出時必須加到 `2Gi` 以上，否則 FFmpeg 會因 OOM 崩潰
+- `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出；`cloudbuild.yaml` 預設為 `false`，需手動帶入 substitution
+- `_MEMORY` 在 `cloudbuild.yaml` 預設為 `1Gi`；啟用影片匯出時建議加到 `2Gi` 以上，否則 FFmpeg 可能 OOM
 - 若部署後 Cloud Run 顯示「需要驗證」而非「公開存取」，可執行 `gcloud run services add-iam-policy-binding <service-name> --region asia-east1 --member="allUsers" --role="roles/run.invoker"` 開放匿名呼叫
 - **PowerShell 注意事項**：`--substitutions` 參數值中包含逗號，PowerShell 會將其解讀為陣列分隔符。務必使用雙引號 `"..."` 將整段參數包住
 

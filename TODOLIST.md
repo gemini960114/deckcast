@@ -262,3 +262,32 @@
 ### 12.12 未做項目（明確延後）
 - [ ] **J6 Step 4 / Step 7 align prompt 語言化**：`GENERATE_PODCAST_SRT` / `REFINE_PODCAST_SRT_TEXT_PROMPT` / `GENERATE_MUSIC_SRT` / `REFINE_MUSIC_SRT_TEXT_PROMPT` 改為可參數化函式；需同步修改 `align-podcast/route.ts`、`align-music/route.ts` 與前端 API 呼叫，範圍較大，本期延後
 - [ ] **語言切換後提醒 banner**：本期不實作，降低 page.tsx 複雜度
+
+## 13. 2026-04-12 部署與維運強化
+
+### 13.1 cloudbuild 版本 tag 支援
+- [x] **`cloudbuild.yaml` 加入 `_IMAGE_TAG`**：build / push / deploy 同時打 `:latest` 與 `:${_IMAGE_TAG}`，預設 `manual`，可由 CLI 覆蓋為 `manual-YYYYMMDDHHMI`
+- [x] **`cloudbuild_500.yaml` 同步加入 `_IMAGE_TAG`**：同上；`images:` 清單補上版本 tag
+
+### 13.2 Cloud Run 資源明確化（`cloudbuild.yaml`）
+- [x] **新增 `--cpu=1`、`--concurrency=10`、`--min-instances=0`、`--max-instances=10`**：取代預設值，Node.js 最小可用配置
+- [x] **記憶體從 `512Mi` 調整為 `1Gi`**：Node.js + LLM 串流安全最低值
+- [x] **`cloudbuild_500.yaml` 對應調整**：CPU=2 / Memory=4Gi / Concurrency=4 / Min=1；新增 `--cpu-boost`；服務名稱統一為 `deckcast`
+
+### 13.3 nginx SSL 反向代理（自架伺服器）
+- [x] **新增 `nginx/default.conf`**：HTTP → HTTPS redirect；`proxy_buffering off`（LLM streaming）；`client_max_body_size 60M`；`proxy_read_timeout 600s`
+- [x] **`docker-compose.yml` 加入 nginx service**：port 80 / 443；掛載 `./nginx/default.conf` 與 `./ssl`；`depends_on: deckcast`
+- [x] **deckcast service 改為 `expose`**：port 3000 不再對外暴露，僅 nginx 內部存取
+- [x] **README 補充 SSL 啟用說明**：`ssl/cert.pem` + `ssl/key.pem` 放置位置與啟動指令
+
+### 13.4 FFmpeg CPU 執行緒限制（`lib/videoExport.ts`）
+- [x] **新增 `getFFmpegThreads()`**：預設 `min(2, cpuCount)`；`VIDEO_FFMPEG_THREADS` env var 可覆蓋，`=0` 不限制
+- [x] **`buildConcatArgs()` / `buildXfadeArgs()` 加入 `-threads N` 與 `-filter_threads N`**：後者確保 xfade filter graph 也受限（global `-threads` 管不到 filter graph）
+- [x] **`.env.example` 補充 `VIDEO_FFMPEG_THREADS`**：含說明與預設行為
+
+### 13.5 使用量記錄（`lib/usageLogger.ts`）
+- [x] **新增 `lib/usageLogger.ts`**：`logUsage(email, action)` — stdout（永遠）+ 檔案（`LOG_FILE_PATH` 設定時）
+- [x] **`getEmailFromRequest(req)`**：安全取得 session email，auth 關閉時回傳 `null`
+- [x] **接入全部 8 個 API route**：`parse-pdf` / `generate-script` / `generate-lyrics` / `generate-podcast` / `generate-music` / `align-podcast` / `align-music` / `export-video`
+- [x] **`docker-compose.yml` 掛載 `./logs:/app/logs`**，並設 `LOG_FILE_PATH=/app/logs/usage.jsonl`
+- [x] **`.env.example` 補充 `LOG_FILE_PATH`**：Docker 填路徑；Cloud Run 留空走 stdout → Cloud Logging
