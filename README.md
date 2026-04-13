@@ -409,6 +409,28 @@ docker compose down
 使用前請先把 [`.env.example`](./.env.example) 複製成 `.env.local`，再填入實際值。
 由於 `docker compose` 的 build args 需要在建置階段就可見，建議固定使用 `docker compose --env-file .env.local ...` 這種寫法。
 
+#### 更新已運行的服務（切換 branch / 拉新版）
+
+不需要停機重建，直接切換 branch 後重 build 即可。瀏覽器 IndexedDB 的歷史紀錄不受影響。
+
+```bash
+# 1. 切換到新 branch（或 git pull 拉新版）
+git fetch origin
+git checkout <new-branch-name>
+
+# 2. 重新 build 並熱替換容器（服務中斷約 1–2 分鐘）
+docker compose --env-file .env.local up -d --build
+```
+
+**常見問題：git fetch 出現 `insufficient permission for adding an object to repository database .git/objects`**
+
+伺服器上若之前曾以 `sudo` 或 root 執行過 docker / git 操作，`.git/objects` 擁有者可能被改為 root。修復方式：
+
+```bash
+sudo chown -R $(whoami):$(whoami) .git
+git fetch origin
+```
+
 #### 啟用 SSL（自有憑證 + 自訂網域）
 
 若需要 HTTPS，專案已內建 nginx 反向代理設定。架構如下：
