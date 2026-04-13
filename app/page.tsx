@@ -55,6 +55,26 @@ function isPdfFile(file: File) {
     fileHasExtension(file, ['.pdf']);
 }
 
+const PDF_PARSE_MAX_RETRIES = 3;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryablePdfParseError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  return msg.includes('high demand') ||
+    msg.includes('try again later') ||
+    msg.includes('busy') ||
+    msg.includes('overloaded') ||
+    msg.includes('429') ||
+    msg.includes('503');
+}
+
+function getPdfRetryDelayMs(attempt: number): number {
+  return ([2000, 4000, 8000] as const)[attempt] ?? 8000;
+}
+
 function getAudioExtension(mimeType: string | undefined, fallback: string) {
   const normalized = (mimeType ?? '').toLowerCase();
 
@@ -325,6 +345,7 @@ export default function Home() {
   const [scriptGeneratedAt, setScriptGeneratedAt] = useState<number | null>(null);
   const [lyricsGeneratedAt, setLyricsGeneratedAt] = useState<number | null>(null);
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
+  const [step1LoadingMsg, setStep1LoadingMsg] = useState('正在解析 PDF 投影片...');
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
   const [step4State, setStep4State] = useState<StepState>({ status: 'idle' });
@@ -532,8 +553,40 @@ export default function Home() {
   }
 
   function openPdfPicker() {
+    if (step1State.status === 'loading') return;
     resetPdfInput();
     pdfUploadInputRef.current?.click();
+  }
+
+  async function parsePdfOnce(pdfBase64: string): Promise<string> {
+    const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64, multimodalModel });
+    if (!res.ok) throw new Error(await res.text());
+    const data = await res.json() as { slides: string };
+    return data.slides;
+  }
+
+  async function parsePdfWithRetry(pdfBase64: string): Promise<string> {
+    let lastError: unknown = new Error('不明錯誤');
+    for (let attempt = 0; attempt <= PDF_PARSE_MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          setStep1LoadingMsg(`正在重新解析 PDF 投影片（${attempt}/${PDF_PARSE_MAX_RETRIES}）...`);
+        }
+        return await parsePdfOnce(pdfBase64);
+      } catch (e) {
+        lastError = e;
+        if (attempt < PDF_PARSE_MAX_RETRIES && isRetryablePdfParseError(e)) {
+          const delayMs = getPdfRetryDelayMs(attempt);
+          const delaySec = delayMs / 1000;
+          setStep1LoadingMsg(`模型繁忙，${delaySec} 秒後自動重試（${attempt + 1}/${PDF_PARSE_MAX_RETRIES}）`);
+          setToast(`模型繁忙，自動重試中（${attempt + 1}/${PDF_PARSE_MAX_RETRIES}）`);
+          await sleep(delayMs);
+        } else {
+          throw e;
+        }
+      }
+    }
+    throw lastError;
   }
 
   async function handlePdfUpload(file: File) {
@@ -547,7 +600,9 @@ export default function Home() {
       return;
     }
 
-    setPdfFile(file); setStep1State({ status: 'loading' });
+    setPdfFile(file);
+    setStep1State({ status: 'loading' });
+    setStep1LoadingMsg('正在解析 PDF 投影片...');
     try {
       // @ts-expect-error: bypass remote https import typing
       const pdfjsLib = await import(/* webpackIgnore: true */ 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/5.4.149/pdf.min.mjs');
@@ -563,10 +618,9 @@ export default function Home() {
       }
 
       const pdfBase64 = await blobToBase64(file);
-      const res = await apiFetch('/api/parse-pdf', { pdf: pdfBase64, multimodalModel });
-      if (!res.ok) throw new Error(await res.text());
-      const data = await res.json();
-      setSlides(data.slides); setStep1State({ status: 'done' });
+      const slidesResult = await parsePdfWithRetry(pdfBase64);
+      setSlides(slidesResult);
+      setStep1State({ status: 'done' });
       const id = `${Date.now()}`; setRecordId(id);
       await saveRecord({
         id,
@@ -592,13 +646,18 @@ export default function Home() {
         styleId,
         lyricsDuration,
         musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '',
-        slides: data.slides,
+        slides: slidesResult,
         pdfBlob: file,
       });
       loadHistory();
       setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
-    } catch (e) { setStep1State({ status: 'error', error: String(e) }); setToast('PDF 解析失敗：' + String(e)); }
-    finally { resetPdfInput(); }
+    } catch (e) {
+      setStep1State({ status: 'error', error: String(e) });
+      setToast('PDF 解析失敗：' + String(e));
+    } finally {
+      resetPdfInput();
+      setStep1LoadingMsg('正在解析 PDF 投影片...');
+    }
   }
 
   async function handleGenerateScript() {
@@ -1011,7 +1070,7 @@ export default function Home() {
     setMusicTimings(null);
     setScriptGeneratedAt(null);
     setLyricsGeneratedAt(null);
-    setStep1State({ status: 'idle' }); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
+    setStep1State({ status: 'idle' }); setStep1LoadingMsg('正在解析 PDF 投影片...'); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
     setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
     setPptxLoading(false); setRecordId('');
@@ -1021,6 +1080,7 @@ export default function Home() {
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false);
+    if (step1State.status === 'loading') return;
     const file = e.dataTransfer.files?.[0];
     if (!file) return;
     if (isPdfFile(file)) {
@@ -1319,7 +1379,7 @@ export default function Home() {
         {/* ── Step 1: Upload PDF ── */}
         <StepCard step={1} title="上傳 PDF" state={step1State} dark={dark}>
           <div
-            className={`border-2 border-dashed rounded-2xl p-7 text-center cursor-pointer transition-all ${dragging ? 'border-emerald-600 bg-emerald-900/10' : t.dropzone
+            className={`border-2 border-dashed rounded-2xl p-7 text-center transition-all ${step1State.status === 'loading' ? 'cursor-wait opacity-70' : 'cursor-pointer'} ${dragging ? 'border-emerald-600 bg-emerald-900/10' : t.dropzone
               }`}
             onClick={openPdfPicker}
           >
@@ -1335,7 +1395,7 @@ export default function Home() {
               }}
             />
             {step1State.status === 'loading' ? (
-              <LoadingBar message="正在解析 PDF 投影片..." dark={dark} />
+              <LoadingBar message={step1LoadingMsg} dark={dark} />
             ) : pdfFile ? (
               <div className="space-y-1">
                 <div className={`w-9 h-9 rounded-full flex items-center justify-center mx-auto mb-2 ${dark ? 'bg-emerald-900/50' : 'bg-emerald-100'}`}>
