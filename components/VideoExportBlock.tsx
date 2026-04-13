@@ -11,6 +11,7 @@ interface VideoExportBlockProps {
   audioBlob: Blob | null;
   timings: SlideTimings | null;
   filename: string;
+  displayName?: string;
   cachedBlob: Blob | null;
   onCached: (blob: Blob) => void;
   onClearCache: () => void;
@@ -47,6 +48,7 @@ export default function VideoExportBlock({
   audioBlob,
   timings,
   filename,
+  displayName,
   cachedBlob,
   onCached,
   onClearCache,
@@ -181,7 +183,7 @@ export default function VideoExportBlock({
         disabled={!canGenerate}
         onClick={() => void handleGenerate()}
       >
-        ⬇ {filename}
+        ⬇ {displayName ?? filename}
       </button>
     );
   }

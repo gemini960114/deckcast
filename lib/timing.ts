@@ -407,6 +407,56 @@ export function normalizeTimings(
   return ensureFinalTimings(timings, slideCount, totalDuration);
 }
 
+/**
+ * 計算實際可用的轉場秒數（PPTX 與 MP4 共用）。
+ *
+ * 規則：
+ *   - 目標是 transitionSec（0.75s）
+ *   - 但不能讓頁面可見時間少於 minVisibleSec
+ *   - 最小保底 0.1s（維持轉場視覺效果）
+ *
+ * 等價於 videoExport.ts 的 fadeDur 計算，確保兩端一致。
+ */
+export function resolveEffectiveTransitionSec(
+  durationSec: number,
+  transitionSec: number,
+  minVisibleSec: number,
+): number {
+  return Math.min(transitionSec, Math.max(0.1, durationSec - minVisibleSec));
+}
+
+/**
+ * 產生供 PPTX 輸出使用的 adjusted timings。
+ *
+ * 規則：
+ *   - 第 1 到第 N-1 頁：durationSec -= actualFade（提早啟動轉場）
+ *   - actualFade 由 resolveEffectiveTransitionSec() 決定，與 MP4 端邏輯一致
+ *   - 最後一頁：保持原始 startSec / endSec / durationSec
+ *
+ * 不回寫 state / IndexedDB / SRT，僅供輸出層使用。
+ */
+export function buildTransitionAdjustedTimings(
+  timings: SlideTimings,
+  transitionSec: number,
+  minVisibleSec: number,
+): SlideTimings {
+  if (timings.length === 0) return [];
+
+  return timings.map((t, i) => {
+    if (i === timings.length - 1) {
+      return { ...t };
+    }
+    const actualFade = resolveEffectiveTransitionSec(t.durationSec, transitionSec, minVisibleSec);
+    const adjustedDuration = t.durationSec - actualFade;
+    const adjustedEnd = t.startSec + adjustedDuration;
+    return {
+      ...t,
+      endSec: adjustedEnd,
+      durationSec: adjustedDuration,
+    };
+  });
+}
+
 // Applies offset to slide timings (only updates endSec and adjusts duration accordingly)
 export function shiftTimings(timings: SlideTimings, offsetSec: number): SlideTimings {
   if (!offsetSec || offsetSec === 0) return timings;

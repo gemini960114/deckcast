@@ -1,5 +1,6 @@
 import type { SlideTimings } from './types';
 import { pdfToJpegBase64 } from './pdfToImages';
+import { LAST_SLIDE_TAIL_SEC } from './constants';
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -101,7 +102,7 @@ export async function generatePptx(
     if (!xml) continue;
     const durationMs = Math.max(Math.round((timings[i]?.durationSec ?? 5) * 1000), 1000);
     const isLastSlide = i === slideFiles.length - 1;
-    const finalDurationMs = isLastSlide ? durationMs + 2000 : durationMs;
+    const finalDurationMs = isLastSlide ? durationMs + LAST_SLIDE_TAIL_SEC * 1000 : durationMs;
     const effectXML = '<p:fade/>';
     const transitionBlock = `<p:transition spd="med" advClick="1" advTm="${finalDurationMs}">${effectXML}</p:transition>`;
 

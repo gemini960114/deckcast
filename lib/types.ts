@@ -69,7 +69,9 @@ export interface GenerationRecord {
   // Content
   slides?: string;
   script?: string;
+  scriptGeneratedAt?: number;
   lyrics?: string;
+  lyricsGeneratedAt?: number;
   pdfBlob?: Blob;
   podcastBlob?: Blob;
   podcastSource?: 'api' | 'upload';

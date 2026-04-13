@@ -2,6 +2,13 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v12 補充亮點（2026-04-14，plan_K PPTX/MP4 時序一致 + plan_L 下載命名）：
+1. **PPTX/MP4 轉場時序統一（plan_K）**：新增 `resolveEffectiveTransitionSec()` 共用函式，PPTX 的 `buildTransitionAdjustedTimings()` 與 MP4 的 xfade offset 均透過此函式計算有效轉場時長；原始 timings 保留於 state / IndexedDB，調整後的 timings 僅在 PPTX 輸出時套用，確保 PPTX 換頁時間點與 MP4 影片在「新頁完全可見」的語意上完全一致。
+2. **MP4 xfade offset 公式修正（plan_K）**：xfade offset 改為直接公式 `offset = timings[i].endSec - fadeDur`（不再累加），解決舊版 cumulative offset 在負 offset 頁面後段誤差累積導致影片錯位的問題；每張投影片的 FFmpeg input `-t` 包含自身時長加上所有後續轉場的 carry-in 時間，確保 xfade 不提早截斷。
+3. **下載命名時間標籤（plan_L）**：所有可下載檔案（script.txt / lyrics.txt / podcast 音訊 / music.mp3 / podcast.srt / music.srt / podcast.pptx / music.pptx / podcast.mp4 / music.mp4）的實際下載檔名均帶上 `_HHmmss` 本地時間標籤。Podcast 系列以 `scriptGeneratedAt` 為錨點，音樂系列以 `lyricsGeneratedAt` 為錨點（均 fallback 至 `createdAt`）；按鈕文字維持短名稱（如 `podcast.mp4`），方便識別但不影響下載。
+4. **`scriptGeneratedAt` / `lyricsGeneratedAt` 新增至 `GenerationRecord`**（`lib/types.ts`）：兩個 `number | undefined` 欄位，分別於 `handleGenerateScript()` / `handleGenerateLyrics()` 設值並存入 IndexedDB；`handleNarrationModeChange()` / `handleNewProject()` 均補入同步清空邏輯，避免舊標籤殘留。
+5. **`VideoExportBlock` 新增 `displayName` prop**（`components/VideoExportBlock.tsx`）：按鈕文字改用 `displayName ?? filename`，`filename` 只控制實際下載名稱，UI 與下載行為完全解耦。
+
 ### ✨ v11 補充亮點（2026-04-12，部署與維運強化）：
 1. **cloudbuild 版本 tag 支援**：`cloudbuild.yaml` 與 `cloudbuild_500.yaml` 均改為同時 build / push / deploy `:latest` 與 `:${_IMAGE_TAG}` 兩個 tag；預設 `_IMAGE_TAG=manual`，可由 CLI `--substitutions` 覆蓋為 `manual-YYYYMMDDHHMI` 格式，方便回溯與回滾。
 2. **Cloud Run 最小可用資源明確化**（`cloudbuild.yaml`）：新增 `--cpu=1`、`--concurrency=10`、`--min-instances=0`、`--max-instances=10`；記憶體從 `512Mi` 調整為 `1Gi`（Node.js + LLM 串流安全最低值）；`cloudbuild_500.yaml` 對應調整為 CPU=2 / Memory=4Gi / Concurrency=4 / Min=1，並加入 `--cpu-boost`。
@@ -1616,7 +1623,8 @@ Step 7：/api/align-music
     ↓  generatePptx(pdf, timings, musicBlob)
     ↓  updateRecord(musicPptxBlob + musicSrt + diagnostics + timings)
     ↓
-下載：script.txt / lyrics.txt / podcast.wav(or 原始上傳格式) / music.mp3 / podcast.srt / music.srt / podcast_slides.pptx / music_slides.pptx / podcast_slides.mp4（選用） / music_slides.mp4（選用）
+下載：script.txt / lyrics.txt / podcast.wav(or 原始上傳格式) / music.mp3 / podcast.srt / music.srt / podcast.pptx / music.pptx / podcast.mp4（選用） / music.mp4（選用）
+（實際下載檔名帶 _HHmmss 時間標籤，例如 podcast_181646.pptx；按鈕顯示名稱維持短名稱）
 ```
 
 ---
@@ -1688,16 +1696,24 @@ export function getMaxConcurrentExports(): number {
 
 `transition='fade'` 且投影片數 > 1 時使用 `buildXfadeArgs()`，否則使用 `buildConcatArgs()`（concat demuxer）。
 
-**時序計算：**
+**時序計算（plan_K 修正版）：**
 ```
-fadeDur[i] = clamp(0.1, 0.8, timings[i].durationSec - 0.2)
-cumOffset[i] = cumOffset[i-1] + timings[i].durationSec - fadeDur[i]  // 絕對時間
+fadeDur[i] = resolveEffectiveTransitionSec(timings[i].durationSec)
+           = clamp(0.1, 0.75, durationSec * 0.3, 但不超過 durationSec - 0.1)
+           （與 PPTX buildTransitionAdjustedTimings() 使用同一函式）
 
-最後一張投影片 -t 補償：
-  lastDuration = timings[n-1].durationSec + sum(fadeDurs) + 2.0
-  (sum(fadeDurs) = xfade 消耗的時間；2.0 = PPTX 最後一頁 +2000ms)
+xfade offset（直接公式，非累積）：
+  offset[i] = timings[i].endSec - fadeDur[i]
+  （timings[i].endSec 為原始 SRT 對齊後的新頁可見時間點）
+
+每張投影片 FFmpeg input -t（含 carry-in）：
+  t[i] = timings[i].durationSec + sum(fadeDur[i+1..n-1]) + 2.0（僅最後一張加 2.0）
+  （carry-in 確保 xfade 有足夠素材，不提早截斷後段轉場）
+
 不加 -shortest：讓影片跑完延伸時間，最後 2 秒靜止畫面
 ```
+
+> PPTX 與 MP4 共用 `resolveEffectiveTransitionSec()`，確保「新頁完全可見的時間點」在兩者之間語意完全一致。timings 代表原始對齊後的時間，PPTX 輸出時透過 `buildTransitionAdjustedTimings()` 扣除轉場時長，MP4 直接用 offset 公式推算，二者最終呈現效果相同。
 
 ### 28.4 前端 VideoExportBlock 狀態機
 

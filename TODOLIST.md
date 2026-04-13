@@ -291,3 +291,45 @@
 - [x] **接入全部 8 個 API route**：`parse-pdf` / `generate-script` / `generate-lyrics` / `generate-podcast` / `generate-music` / `align-podcast` / `align-music` / `export-video`
 - [x] **`docker-compose.yml` 掛載 `./logs:/app/logs`**，並設 `LOG_FILE_PATH=/app/logs/usage.jsonl`
 - [x] **`.env.example` 補充 `LOG_FILE_PATH`**：Docker 填路徑；Cloud Run 留空走 stdout → Cloud Logging
+
+## 14. 2026-04-14 plan_K 完成項目（PPTX/MP4 時序統一）
+
+### 14.1 共用轉場計算函式（`lib/timing.ts`）
+- [x] **新增 `resolveEffectiveTransitionSec(durationSec)`**：`clamp(0.1, 0.75, durationSec * 0.3)`，同時不超過 `durationSec - 0.1`；PPTX 與 MP4 共用此函式，確保轉場時長計算語意一致
+- [x] **`buildTransitionAdjustedTimings()` 改用 `resolveEffectiveTransitionSec()`**：PPTX 輸出時的換頁時間扣除量與 MP4 使用相同基準；短頁不再因 `max(durationSec - 0.75, 0.5)` 硬保底而拉長超過原本語意 `endSec`
+- [x] **原始 timings 保留**：state 與 IndexedDB 儲存未調整的原始 timings；`buildTransitionAdjustedTimings()` 僅在 PPTX 輸出時呼叫，不影響 SRT offset 重封裝與 MP4 的時間計算
+
+### 14.2 MP4 xfade offset 公式修正（`lib/videoExport.ts`）
+- [x] **xfade offset 改為直接公式**：`offset = timings[i].endSec - fadeDur`（取代舊版累積 cumOffset），消除舊版在負 offset 頁面後段誤差累積導致影片錯位的問題
+- [x] **每張投影片 input `-t` 加入 carry-in**：`-t` = 自身 durationSec + 後續所有轉場的 fadeDur 之和（最後一張再加 2.0s）；確保 xfade 每個轉場都有足夠素材，不會提早截斷後段影像
+- [x] **更新 `lib/videoExport.ts` 舊版注解**：對齊實際程式碼，移除殘留的 cumOffset 公式描述，避免後續讀者誤解
+
+## 15. 2026-04-14 plan_L 完成項目（下載命名時間標籤）
+
+### 15.1 型別擴充（`lib/types.ts`）
+- [x] **`GenerationRecord` 新增 `scriptGeneratedAt?: number`**：記錄文稿生成時間戳（毫秒 epoch），作為 Podcast 系列下載命名的錨點
+- [x] **`GenerationRecord` 新增 `lyricsGeneratedAt?: number`**：記錄歌詞生成時間戳，作為音樂系列下載命名的錨點
+
+### 15.2 命名工具函式（`app/page.tsx`）
+- [x] **新增 `formatTimeTag(ts: number): string`**：timestamp 轉 `HHmmss` 本地時間字串
+- [x] **新增 `buildTaggedName(base, tag, ext): string`**：有 tag 時回傳 `base_tag.ext`，無 tag 時回傳 `base.ext`
+- [x] **新增 `getPodcastTag(scriptGeneratedAt?, createdAt?): string | null`**：優先用 `scriptGeneratedAt`，fallback `createdAt`，均無則 `null`
+- [x] **新增 `getMusicTag(lyricsGeneratedAt?, createdAt?): string | null`**：優先用 `lyricsGeneratedAt`，fallback `createdAt`，均無則 `null`
+
+### 15.3 state 管理（`app/page.tsx`）
+- [x] **新增 `scriptGeneratedAt` / `lyricsGeneratedAt` state**：`useState<number | null>(null)`
+- [x] **`handleGenerateScript()` 記錄時間戳**：`const now = Date.now(); setScriptGeneratedAt(now)`，同步存入 IndexedDB（`scriptGeneratedAt: now`）
+- [x] **`handleGenerateLyrics()` 記錄時間戳**：同上，`lyricsGeneratedAt: now`
+- [x] **`loadRecord()` 回填時間戳**：`setScriptGeneratedAt(rec.scriptGeneratedAt ?? null); setLyricsGeneratedAt(rec.lyricsGeneratedAt ?? null)`
+- [x] **`handleNewProject()` 清除時間戳**：`setScriptGeneratedAt(null); setLyricsGeneratedAt(null)`
+- [x] **`handleNarrationModeChange()` 清除時間戳**：`setScriptGeneratedAt(null); setLyricsGeneratedAt(null)`，確保模式切換後不殘留舊標籤
+
+### 15.4 下載點更新（`app/page.tsx`）
+- [x] **Podcast 系列（6 個下載點）**：script.txt / podcast 音訊 / podcast.pptx / podcast.srt / podcast.mp4（VideoExportBlock）/ Download Panel 對應按鈕，全部改用 `buildTaggedName(..., getPodcastTag(scriptGeneratedAt, record?.createdAt), ...)`
+- [x] **音樂系列（6 個下載點）**：lyrics.txt / music.mp3 / music.pptx / music.srt / music.mp4（VideoExportBlock）/ Download Panel 對應按鈕，全部改用 `buildTaggedName(..., getMusicTag(lyricsGeneratedAt, record?.createdAt), ...)`
+- [x] **History Drawer（8 個下載點）**：Podcast / 音樂各 4 個按鈕，改用 `rec.scriptGeneratedAt` / `rec.lyricsGeneratedAt`（fallback `rec.createdAt`）
+- [x] **VideoExportBlock 加入 `displayName` prop**：`displayName="podcast.mp4"` / `"music.mp4"`（短名稱顯示），`filename` 仍傳帶時間標籤的完整名稱（實際下載用）
+
+### 15.5 `VideoExportBlock` 元件更新（`components/VideoExportBlock.tsx`）
+- [x] **新增 `displayName?: string` prop**：按鈕文字改用 `displayName ?? filename`，UI 顯示名稱與下載檔名完全解耦
+- [x] **`filename` 與 `triggerDownload` 調用不變**：`filename` 仍作為實際下載名稱，快取與下載邏輯完全相容

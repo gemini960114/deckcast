@@ -5,6 +5,12 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import type { SlideTimings } from './types';
+import {
+  TRANSITION_COMPENSATION_SEC,
+  MIN_VISIBLE_SLIDE_SEC,
+  LAST_SLIDE_TAIL_SEC,
+} from './constants';
+import { resolveEffectiveTransitionSec } from './timing';
 
 const execFileAsync = promisify(execFile);
 
@@ -149,19 +155,18 @@ function buildConcatArgs(
 /**
  * Build FFmpeg args for xfade-based slide transitions.
  *
- * Timing rule (per plan_D §5.2):
- *   fadeDur[i] = clamp(0.1, 0.8, timings[i].durationSec - 0.2)
- *   cumOffset[i] = cumOffset[i-1] + timings[i].durationSec - fadeDur[i]
- *   → xfade[i].offset   = cumOffset[i]
- *   → xfade[i].duration = fadeDur[i]
+ * Timing rule (plan_K):
+ *   fadeDur[i] = resolveEffectiveTransitionSec(durationSec, 0.75, 0.5)
+ *              = min(0.75, max(0.1, durationSec - 0.5))
+ *   offset[i]  = timings[i].endSec - fadeDur[i]
+ *   → slide i+1 is fully visible exactly at audio time timings[i].endSec
+ *   → matches PPTX advTm behaviour (same resolveEffectiveTransitionSec logic)
  *
  * Duration fix:
- *   Each xfade overlap removes fadeDur[i] seconds from the output timeline,
- *   making the video end sum(fadeDur) seconds too early.
- *   Fix: extend the last slide's -t by totalFadeDuration + 2.0 s tail
- *   (the +2 s matches generatePptx.ts's last-slide +2000 ms behaviour).
+ *   Each xfade overlap removes fadeDur[i] seconds from the output timeline.
+ *   Fix: extend the last slide's -t by totalFadeDuration + LAST_SLIDE_TAIL_SEC.
  *   -shortest is omitted so the video runs its full extended duration,
- *   giving a 2 s silent tail with the last slide visible — matching PPTX.
+ *   giving a silent tail with the last slide visible — matching PPTX.
  */
 function buildXfadeArgs(
   workDir: string,
@@ -176,25 +181,31 @@ function buildXfadeArgs(
   const n = timings.length;
 
   // Pre-compute all fade durations first — needed for last-slide extension.
+  // Uses resolveEffectiveTransitionSec(), the same helper as buildTransitionAdjustedTimings(),
+  // ensuring PPTX and MP4 apply identical fade logic per slide.
   const fadeDurs: number[] = [];
   for (let i = 0; i < n - 1; i++) {
-    fadeDurs.push(Math.min(0.8, Math.max(0.1, timings[i].durationSec - 0.2)));
+    fadeDurs.push(resolveEffectiveTransitionSec(
+      timings[i].durationSec,
+      TRANSITION_COMPENSATION_SEC,
+      MIN_VISIBLE_SLIDE_SEC,
+    ));
   }
-  const totalFadeDuration = fadeDurs.reduce((sum, d) => sum + d, 0);
-  const TAIL_SEC = 2.0; // matches generatePptx.ts +2000 ms on last slide
+  const TAIL_SEC = LAST_SLIDE_TAIL_SEC;
 
   const threadArgs = threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
   const args: string[] = ['-y', ...threadArgs];
 
   // One looped input per slide.
-  // Last slide gets extra time to compensate for:
-  //   - totalFadeDuration: time consumed by xfade overlaps (prevents early cut-off)
-  //   - TAIL_SEC: last slide stays visible 2 s after audio ends (matches PPTX)
+  // With direct offset formula (offset = endSec - fadeDur), each slide i (i > 0)
+  // starts fading in at OUTPUT time = offset[i-1]. Its input must cover from that
+  // point until the next transition starts, so it needs its own durationSec plus
+  // the carry-in fade from the previous transition (fadeDurs[i-1]).
+  // Last slide additionally gets TAIL_SEC for the silent tail after audio ends.
   for (let i = 0; i < n; i++) {
     const imgPath = path.join(workDir, `slide_${String(i + 1).padStart(3, '0')}.jpg`);
-    const duration = i === n - 1
-      ? timings[i].durationSec + totalFadeDuration + TAIL_SEC
-      : timings[i].durationSec;
+    const carryInFade = i > 0 ? fadeDurs[i - 1] : 0;
+    const duration = timings[i].durationSec + carryInFade + (i === n - 1 ? TAIL_SEC : 0);
     args.push('-loop', '1', '-t', duration.toFixed(3), '-i', imgPath);
   }
   // Audio input (index n in FFmpeg's input list)
@@ -208,18 +219,20 @@ function buildXfadeArgs(
     filterParts.push(`[${i}:v]${scale}[v${i}s]`);
   }
 
-  // xfade chain with cumulative offsets (uses pre-computed fadeDurs)
-  let cumOffset = 0;
+  // xfade chain — offset derived directly from semantic end time:
+  //   offset = timings[i].endSec - fadeDur
+  // This ensures slide i+1 is fully visible exactly at audio time timings[i].endSec,
+  // matching PPTX behaviour (advTm = durationSec - 0.75s for non-last slides).
   for (let i = 0; i < n - 1; i++) {
     const fadeDur = fadeDurs[i];
-    cumOffset += timings[i].durationSec - fadeDur;
+    const offset = timings[i].endSec - fadeDur;
 
     const inputA = i === 0 ? '[v0s]' : `[xf${i - 1}]`;
     const inputB = `[v${i + 1}s]`;
     const outputTag = i === n - 2 ? '[vout]' : `[xf${i}]`;
 
     filterParts.push(
-      `${inputA}${inputB}xfade=transition=fade:duration=${fadeDur.toFixed(3)}:offset=${cumOffset.toFixed(3)}${outputTag}`,
+      `${inputA}${inputB}xfade=transition=fade:duration=${fadeDur.toFixed(3)}:offset=${offset.toFixed(3)}${outputTag}`,
     );
   }
 

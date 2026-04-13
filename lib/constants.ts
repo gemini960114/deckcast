@@ -193,3 +193,8 @@ export function encodeApiKey(raw: string): string {
 export function decodeApiKey(encoded: string): string {
   return xorWithSeed(atob(encoded), API_KEY_SEED);
 }
+
+// ===== Timing / Transition =====
+export const TRANSITION_COMPENSATION_SEC = 0.75;
+export const MIN_VISIBLE_SLIDE_SEC = 0.5;
+export const LAST_SLIDE_TAIL_SEC = 2.0;

@@ -88,6 +88,7 @@
 
 - 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
 - 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
+- PPTX 與 MP4 共用同一套 `resolveEffectiveTransitionSec()` 計算轉場時長，確保兩者時間語意完全一致：timings 代表「新頁完全可見的時間點」，在 PPTX 與 MP4 均成立
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
 - 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg
 - 點選「重新生成」會立即清除快取並重新合成；「重試」在錯誤後也會直接重跑，無需再次手動點擊
@@ -106,11 +107,12 @@
 - PDF 每頁透過 Canvas 渲染為圖片，注入 XML 轉場效果 `<p:fade/>` 產生淡入特效。
 - 第一頁嵌入的音訊物件會額外補寫 `<p:timing>`，讓 PowerPoint 更接近「開場自動播放 + 跨頁持續播放」的行為。
 - 最後一頁仍會保留 `advTm`，並在原本時長後額外多等 2 秒再跳向不存在的下一頁，方便後續輸出為影片時保留結尾停留時間。
+- **PPTX 轉場補償（`buildTransitionAdjustedTimings()`）**：PPTX 換頁時間以 `resolveEffectiveTransitionSec()` 推算有效轉場時長，並從 `durationSec` 中扣除；原始 timings 保留於 state 與 IndexedDB，調整後的 timings 僅在輸出 PPTX 時使用，確保 SRT offset 重封裝與 MP4 使用的時間語意保持一致。
 
 | 檔案 | 換頁時間計算方式 |
 |---|---|
-| `podcast_slides.pptx` | 依據對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
-| `music_slides.pptx` | 依據歌詞錨點、對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
+| `podcast.pptx` | 依據對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
+| `music.pptx` | 依據歌詞錨點、對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
 
 > 目前程式已補寫 PowerPoint timing XML，實務上更接近「第一頁自動播放、跨頁持續播放」。但不同版本的 PowerPoint 相容性仍可能有差異；若播放行為不如預期，保守做法仍是下載後將音訊與簡報同時啟動。
 
@@ -118,7 +120,7 @@
 
 ## 可下載檔案
 
-| 檔案 | 說明 | 解鎖時機 |
+| 顯示名稱（按鈕文字） | 說明 | 解鎖時機 |
 |---|---|---|
 | `script.txt` | Podcast 對話文稿 | 文稿生成後 |
 | `lyrics.txt` | 歌曲歌詞 | 歌詞生成後 |
@@ -126,10 +128,12 @@
 | `music.mp3` | 歌曲音訊 | 音樂生成後 |
 | `podcast.srt` | Podcast 字幕 | Podcast 對齊完成後 |
 | `music.srt` | 音樂字幕 | 音樂對齊完成後 |
-| `podcast_slides.pptx` | Podcast 同步簡報 | Step 4 完成後 |
-| `music_slides.pptx` | 音樂同步簡報 | Step 7 完成後 |
-| `podcast_slides.mp4` | Podcast 影片（1080p，含 fade 轉場） | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
-| `music_slides.mp4` | 音樂影片（1080p，含 fade 轉場） | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `podcast.pptx` | Podcast 同步簡報 | Step 4 完成後 |
+| `music.pptx` | 音樂同步簡報 | Step 7 完成後 |
+| `podcast.mp4` | Podcast 影片（1080p，含 fade 轉場） | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `music.mp4` | 音樂影片（1080p，含 fade 轉場） | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+
+> **實際下載檔名帶時間戳記**：以上顯示名稱僅為按鈕文字。實際下載的檔案會自動帶上 `_HHmmss` 時間標籤（本地時間），例如 `script_181646.txt`、`podcast_181646.pptx`、`podcast_181646.mp4`。Podcast 系列以文稿生成時間為錨點，音樂系列以歌詞生成時間為錨點。同一工作階段多次下載可安全共存，不會互相覆蓋。
 
 ---
 

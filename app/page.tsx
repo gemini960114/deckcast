@@ -5,7 +5,7 @@ import { setUnauthorizedHandler, apiFetch } from '@/lib/apiFetch';
 import LoginPage from '@/components/LoginPage';
 import VideoExportBlock from '@/components/VideoExportBlock';
 import { generatePptx } from '@/lib/generatePptx';
-import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings } from '@/lib/timing';
+import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings, buildTransitionAdjustedTimings } from '@/lib/timing';
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
@@ -22,6 +22,7 @@ import {
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
   TTS_WARN_SEC, TTS_LONG_SEC, TTS_CHUNK_CHARS, CHUNK_GAP_MS,
   DEFAULT_CONTENT_LANGUAGE, CONTENT_LANGUAGE_OPTIONS,
+  TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC,
 } from '@/lib/constants';
 import { estimateTtsDuration, estimateChunkCount } from '@/lib/ttsEstimate';
 
@@ -72,6 +73,30 @@ function getAudioMimeType(file: File, fallback: string) {
 
 function getPodcastDownloadName(blob: Blob) {
   return `podcast.${getAudioExtension(blob.type, 'mp3')}`;
+}
+
+function formatTimeTag(ts: number): string {
+  const d = new Date(ts);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}${mm}${ss}`;
+}
+
+function buildTaggedName(base: string, tag: string | null, ext: string): string {
+  return tag ? `${base}_${tag}.${ext}` : `${base}.${ext}`;
+}
+
+function getPodcastTag(scriptGeneratedAt?: number | null, createdAt?: number): string | null {
+  if (scriptGeneratedAt) return formatTimeTag(scriptGeneratedAt);
+  if (createdAt) return formatTimeTag(createdAt);
+  return null;
+}
+
+function getMusicTag(lyricsGeneratedAt?: number | null, createdAt?: number): string | null {
+  if (lyricsGeneratedAt) return formatTimeTag(lyricsGeneratedAt);
+  if (createdAt) return formatTimeTag(createdAt);
+  return null;
 }
 
 // ── theme tokens ──
@@ -290,6 +315,8 @@ export default function Home() {
   const [musicTimings, setMusicTimings] = useState<SlideTimings | null>(null);
   const [podcastVideoBlob, setPodcastVideoBlob] = useState<Blob | null>(null);
   const [musicVideoBlob, setMusicVideoBlob] = useState<Blob | null>(null);
+  const [scriptGeneratedAt, setScriptGeneratedAt] = useState<number | null>(null);
+  const [lyricsGeneratedAt, setLyricsGeneratedAt] = useState<number | null>(null);
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
   const [step3State, setStep3State] = useState<StepState>({ status: 'idle' });
@@ -567,8 +594,10 @@ export default function Home() {
         contentLanguage,
       });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); setScript(data.script); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage }, normalizedOwnerEmail);
+      const data = await res.json();
+      const now = Date.now();
+      setScript(data.script); setScriptGeneratedAt(now); setStep2State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { script: data.script, scriptGeneratedAt: now, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -628,7 +657,8 @@ export default function Home() {
       const appliedOffset = podcastSrtOffset;
       const newTimings = shiftTimings(podcastTimings, appliedOffset);
       const adjustedSrt = adjustSrtTimes(podcastSrt, appliedOffset);
-      const pptx = await generatePptx(pdfFile, newTimings, podcastBlob);
+      const adjustedTimings = buildTransitionAdjustedTimings(newTimings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, podcastBlob);
       setPodcastTimings(newTimings);
       setPodcastSrt(adjustedSrt);
       setPodcastSrtOffset(0);
@@ -655,7 +685,8 @@ export default function Home() {
       const appliedOffset = musicSrtOffset;
       const newTimings = shiftTimings(musicTimings, appliedOffset);
       const adjustedSrt = adjustSrtTimes(musicSrt, appliedOffset);
-      const pptx = await generatePptx(pdfFile, newTimings, musicBlob);
+      const adjustedTimings = buildTransitionAdjustedTimings(newTimings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, musicBlob);
       setMusicTimings(newTimings);
       setMusicSrt(adjustedSrt);
       setMusicSrtOffset(0);
@@ -706,7 +737,8 @@ export default function Home() {
         timings = await calcPodcastTimings(script, slideCount, podcastBlob);
       }
 
-      const pptx = await generatePptx(pdfFile, timings, podcastBlob);
+      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, podcastBlob);
       setPodcastPptxBlob(pptx); setPodcastSrt(srt); setStep4State({ status: 'done' });
       setPodcastDiagnostics(diagnostics);
       setPodcastTimings(timings);
@@ -735,8 +767,10 @@ export default function Home() {
     try {
       const res = await apiFetch('/api/generate-lyrics', { lyricsSource, styleId, duration: lyricsDuration, textModel, contentLanguage });
       if (!res.ok) throw new Error(await res.text());
-      const data = await res.json(); setLyrics(data.lyrics); setStep5State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel, contentLanguage }, normalizedOwnerEmail);
+      const data = await res.json();
+      const now = Date.now();
+      setLyrics(data.lyrics); setLyricsGeneratedAt(now); setStep5State({ status: 'done' });
+      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, lyricsGeneratedAt: now, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step6Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep5State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
   }
@@ -828,7 +862,8 @@ export default function Home() {
         timings = await calcMusicTimings(slideCount, musicBlob, lyrics);
       }
 
-      const pptx = await generatePptx(pdfFile, timings, musicBlob);
+      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, musicBlob);
       setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
       setMusicDiagnostics(diagnostics);
       setMusicTimings(timings);
@@ -890,6 +925,8 @@ export default function Home() {
     if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
     if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
     if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
+    setScriptGeneratedAt(rec.scriptGeneratedAt ?? null);
+    setLyricsGeneratedAt(rec.lyricsGeneratedAt ?? null);
     setPodcastVideoBlob(null); setMusicVideoBlob(null);
     setPodcastSrtOffset(0); setMusicSrtOffset(0);
     setRecordId(rec.id); setDrawerOpen(false);
@@ -901,8 +938,8 @@ export default function Home() {
     setNarrationMode(mode);
     if (script) {
       // Clear mode-derived text content so stale duo/solo script can't be used downstream
-      setScript('');
-      setLyrics('');
+      setScript(''); setScriptGeneratedAt(null);
+      setLyrics(''); setLyricsGeneratedAt(null);
       // Reset all step states (step 3–7 depend on correct script/lyrics)
       setStep2State({ status: 'idle' });
       setStep3State({ status: 'idle' });
@@ -951,6 +988,8 @@ export default function Home() {
     setMusicSrtOffset(0);
     setPodcastTimings(null);
     setMusicTimings(null);
+    setScriptGeneratedAt(null);
+    setLyricsGeneratedAt(null);
     setStep1State({ status: 'idle' }); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
     setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
@@ -1296,7 +1335,7 @@ export default function Home() {
             {script && step2State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <TextBlock text={script} dark={dark} />
-                <DownloadChip label="script.txt" onClick={() => downloadText(script, 'script.txt')} dark={dark} />
+                <DownloadChip label="script.txt" onClick={() => downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt'))} dark={dark} />
               </div>
             )}
             {step2State.error && <p className={errBox}>{step2State.error}</p>}
@@ -1413,7 +1452,14 @@ export default function Home() {
             {podcastBlob && step3State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <AudioPlayer blob={podcastBlob} label={podcastSource === 'upload' ? '上傳的 Podcast' : 'AI 生成 Podcast'} dark={dark} />
-                <DownloadChip label={getPodcastDownloadName(podcastBlob)} onClick={() => downloadBlob(podcastBlob, getPodcastDownloadName(podcastBlob))} dark={dark} />
+                <DownloadChip
+                  label={getPodcastDownloadName(podcastBlob)}
+                  onClick={() => {
+                    const ext = getAudioExtension(podcastBlob.type, 'mp3');
+                    downloadBlob(podcastBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), ext));
+                  }}
+                  dark={dark}
+                />
               </div>
             )}
             {step3State.error && <p className={errBox}>{step3State.error}</p>}
@@ -1441,10 +1487,10 @@ export default function Home() {
                     ASR 模式：{podcastDiagnostics.asrMode} ／ 字幕來源：{podcastDiagnostics.srtSource} ／ 對齊來源：{podcastDiagnostics.timingSource}
                   </p>
                 )}
-                <DownloadChip label="podcast_slides.pptx" onClick={() => downloadBlob(podcastPptxBlob, 'podcast_slides.pptx')} dark={dark} />
+                <DownloadChip label="podcast.pptx" onClick={() => downloadBlob(podcastPptxBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'pptx'))} dark={dark} />
                 {podcastSrt && (
                   <div className="inline-flex items-center">
-                    <DownloadChip label="podcast.srt" onClick={() => downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), 'podcast.srt')} dark={dark} />
+                    <DownloadChip label="podcast.srt" onClick={() => downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt'))} dark={dark} />
                     <OffsetSelect offset={podcastSrtOffset} onChange={setPodcastSrtOffset} dark={dark} />
                     {podcastTimings && podcastSrtOffset !== 0 && (
                       <button onClick={handleRepackPodcastPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
@@ -1465,7 +1511,8 @@ export default function Home() {
             pdfBlob={pdfFile}
             audioBlob={podcastBlob}
             timings={podcastTimings}
-            filename="podcast_slides.mp4"
+            filename={buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'mp4')}
+            displayName="podcast.mp4"
             cachedBlob={podcastVideoBlob}
             onCached={setPodcastVideoBlob}
             onClearCache={() => setPodcastVideoBlob(null)}
@@ -1483,7 +1530,7 @@ export default function Home() {
             {lyrics && step5State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <TextBlock text={lyrics} dark={dark} />
-                <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, 'lyrics.txt')} dark={dark} />
+                <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, buildTaggedName('lyrics', getMusicTag(lyricsGeneratedAt), 'txt'))} dark={dark} />
               </div>
             )}
             {step5State.error && <p className={errBox}>{step5State.error}</p>}
@@ -1563,7 +1610,7 @@ export default function Home() {
             {musicBlob && step6State.status === 'done' && (
               <div className="mt-3 space-y-2">
                 <AudioPlayer blob={musicBlob} label={musicSource === 'upload' ? '上傳的歌曲' : 'AI 歌曲'} dark={dark} />
-                <DownloadChip label="music.mp3" onClick={() => downloadBlob(musicBlob, 'music.mp3')} dark={dark} />
+                <DownloadChip label="music.mp3" onClick={() => downloadBlob(musicBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp3'))} dark={dark} />
               </div>
             )}
             {step6State.error && (
@@ -1594,10 +1641,10 @@ export default function Home() {
                     ASR 模式：{musicDiagnostics.asrMode} ／ 字幕來源：{musicDiagnostics.srtSource} ／ 對齊來源：{musicDiagnostics.timingSource}
                   </p>
                 )}
-                <DownloadChip label="music_slides.pptx" onClick={() => downloadBlob(musicPptxBlob, 'music_slides.pptx')} dark={dark} />
+                <DownloadChip label="music.pptx" onClick={() => downloadBlob(musicPptxBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'pptx'))} dark={dark} />
                 {musicSrt && (
                   <div className="inline-flex items-center">
-                    <DownloadChip label="music.srt" onClick={() => downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), 'music.srt')} dark={dark} />
+                    <DownloadChip label="music.srt" onClick={() => downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt'))} dark={dark} />
                     <OffsetSelect offset={musicSrtOffset} onChange={setMusicSrtOffset} dark={dark} />
                     {musicTimings && musicSrtOffset !== 0 && (
                       <button onClick={handleRepackMusicPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
@@ -1618,7 +1665,8 @@ export default function Home() {
             pdfBlob={pdfFile}
             audioBlob={musicBlob}
             timings={musicTimings}
-            filename="music_slides.mp4"
+            filename={buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp4')}
+            displayName="music.mp4"
             cachedBlob={musicVideoBlob}
             onCached={setMusicVideoBlob}
             onClearCache={() => setMusicVideoBlob(null)}
@@ -1642,10 +1690,10 @@ export default function Home() {
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { label: 'slides.txt', avail: !!slides, fn: () => slides && downloadText(slides, 'slides.txt') },
-                  { label: 'script.txt', avail: !!script, fn: () => script && downloadText(script, 'script.txt') },
-                  { label: 'lyrics.txt', avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, 'lyrics.txt') },
-                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), 'podcast.srt') },
-                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), 'music.srt') },
+                  { label: 'script.txt', avail: !!script, fn: () => script && downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt')) },
+                  { label: 'lyrics.txt', avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, buildTaggedName('lyrics', getMusicTag(lyricsGeneratedAt), 'txt')) },
+                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt')) },
+                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt')) },
                 ].map(({ label, avail, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, false)}`}>
@@ -1660,8 +1708,8 @@ export default function Home() {
               <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>🎧 音訊</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: podcastBlob ? getPodcastDownloadName(podcastBlob) : 'podcast.mp3', avail: !!podcastBlob, load: false, fn: () => podcastBlob && downloadBlob(podcastBlob, getPodcastDownloadName(podcastBlob)) },
-                  { label: 'music.mp3', avail: !!musicBlob, load: false, fn: () => musicBlob && downloadBlob(musicBlob, 'music.mp3') },
+                  { label: podcastBlob ? getPodcastDownloadName(podcastBlob) : 'podcast.mp3', avail: !!podcastBlob, load: false, fn: () => { if (!podcastBlob) return; const ext = getAudioExtension(podcastBlob.type, 'mp3'); downloadBlob(podcastBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), ext)); } },
+                  { label: 'music.mp3', avail: !!musicBlob, load: false, fn: () => musicBlob && downloadBlob(musicBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp3')) },
                 ].map(({ label, avail, load, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail && !load}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, load)}`}>
@@ -1676,8 +1724,8 @@ export default function Home() {
               <p className={`text-[10px] uppercase tracking-widest font-bold mb-1.5 ${dark ? 'text-slate-600' : 'text-slate-400'}`}>📊 簡報</p>
               <div className="grid grid-cols-2 gap-2">
                 {[
-                  { label: 'podcast_slides.pptx', avail: !!podcastPptxBlob, load: pptxLoading, fn: () => podcastPptxBlob && downloadBlob(podcastPptxBlob, 'podcast_slides.pptx') },
-                  { label: 'music_slides.pptx', avail: !!musicPptxBlob, load: pptxLoading, fn: () => musicPptxBlob && downloadBlob(musicPptxBlob, 'music_slides.pptx') },
+                  { label: 'podcast.pptx', avail: !!podcastPptxBlob, load: pptxLoading, fn: () => podcastPptxBlob && downloadBlob(podcastPptxBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'pptx')) },
+                  { label: 'music.pptx', avail: !!musicPptxBlob, load: pptxLoading, fn: () => musicPptxBlob && downloadBlob(musicPptxBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'pptx')) },
                 ].map(({ label, avail, load, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail && !load}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, load)}`}>
@@ -1692,18 +1740,18 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-2">
                   {podcastVideoBlob && (
                     <button
-                      onClick={() => downloadBlob(podcastVideoBlob, 'podcast_slides.mp4')}
+                      onClick={() => downloadBlob(podcastVideoBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'mp4'))}
                       className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
                     >
-                      ⬇ podcast_slides.mp4
+                      ⬇ podcast.mp4
                     </button>
                   )}
                   {musicVideoBlob && (
                     <button
-                      onClick={() => downloadBlob(musicVideoBlob, 'music_slides.mp4')}
+                      onClick={() => downloadBlob(musicVideoBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp4'))}
                       className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
                     >
-                      ⬇ music_slides.mp4
+                      ⬇ music.mp4
                     </button>
                   )}
                 </div>
@@ -1742,14 +1790,14 @@ export default function Home() {
                       載入此紀錄
                     </button>
                     <div className="flex flex-wrap gap-1.5">
-                      {rec.script && <button onClick={() => downloadText(rec.script!, 'script.txt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓script</button>}
-                      {rec.lyrics && <button onClick={() => downloadText(rec.lyrics!, 'lyrics.txt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓lyrics</button>}
-                      {rec.podcastBlob && <button onClick={() => downloadBlob(rec.podcastBlob!, getPodcastDownloadName(rec.podcastBlob!))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓{getPodcastDownloadName(rec.podcastBlob!)}</button>}
-                      {rec.musicBlob && <button onClick={() => downloadBlob(rec.musicBlob!, 'music.mp3')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music</button>}
-                      {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, 'podcast_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
-                      {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, 'music_slides.pptx')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
-                      {rec.podcastSrt && <button onClick={() => downloadText(rec.podcastSrt!, 'podcast.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
-                      {rec.musicSrt && <button onClick={() => downloadText(rec.musicSrt!, 'music.srt')} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
+                      {rec.script && <button onClick={() => downloadText(rec.script!, buildTaggedName('script', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'txt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓script</button>}
+                      {rec.lyrics && <button onClick={() => downloadText(rec.lyrics!, buildTaggedName('lyrics', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'txt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓lyrics</button>}
+                      {rec.podcastBlob && <button onClick={() => { const ext = getAudioExtension(rec.podcastBlob!.type, 'mp3'); downloadBlob(rec.podcastBlob!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), ext)); }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓podcast</button>}
+                      {rec.musicBlob && <button onClick={() => downloadBlob(rec.musicBlob!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'mp3'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music</button>}
+                      {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
+                      {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
+                      {rec.podcastSrt && <button onClick={() => downloadText(rec.podcastSrt!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'srt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
+                      {rec.musicSrt && <button onClick={() => downloadText(rec.musicSrt!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'srt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
                       <button onClick={() => { void deleteRecord(rec.id, normalizedOwnerEmail); void loadHistory(); }}
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ml-auto ${dark ? 'text-red-400 bg-red-900/30 hover:bg-red-900/50' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>刪除</button>
                     </div>

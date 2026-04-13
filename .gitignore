@@ -47,6 +47,12 @@ desktop.ini
 # ── Vercel ──
 .vercel
 
+# ── Runtime logs (may contain PII emails) ──
+logs/
+
+# ── SSL certificates (private keys must never be committed) ──
+ssl/
+
 # ── Local planning / review docs (not for repo) ──
 plan*.md
 recommand*.md
