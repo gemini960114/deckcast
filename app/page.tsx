@@ -228,15 +228,29 @@ function AudioPlayer({ blob, label, dark }: { blob: Blob; label: string; dark: b
 // ── TextBlock ──
 function TextBlock({ text, dark }: { text: string; dark: boolean }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const t = useTheme(dark);
+
+  function handleCopy() {
+    void navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
   return (
     <div className="space-y-1.5">
       <div className={`border rounded-xl p-3 text-[11px] font-mono whitespace-pre-wrap overflow-y-auto transition-all leading-relaxed ${t.mono} ${expanded ? 'max-h-[45vh]' : 'max-h-28'}`}>
         {text}
       </div>
-      <button onClick={() => setExpanded(e => !e)} className={`text-[11px] font-semibold ${t.green} hover:opacity-80`}>
-        {expanded ? '↑ 收合' : '↓ 展開全文'}
-      </button>
+      <div className="flex items-center gap-3">
+        <button onClick={() => setExpanded(e => !e)} className={`text-[11px] font-semibold ${t.green} hover:opacity-80`}>
+          {expanded ? '↑ 收合' : '↓ 展開全文'}
+        </button>
+        <button onClick={handleCopy} className={`text-[11px] font-semibold transition-colors ${copied ? (dark ? 'text-emerald-400' : 'text-emerald-600') : (dark ? 'text-slate-400 hover:text-slate-200' : 'text-slate-400 hover:text-slate-600')}`}>
+          {copied ? '✓ 已複製' : '複製全文'}
+        </button>
+      </div>
     </div>
   );
 }
