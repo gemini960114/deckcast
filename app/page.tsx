@@ -48,6 +48,13 @@ function fileHasExtension(file: File, extensions: string[]) {
   return extensions.some(ext => fileName.endsWith(ext));
 }
 
+function isPdfFile(file: File) {
+  const mimeType = file.type.toLowerCase();
+  return mimeType === 'application/pdf' ||
+    mimeType === 'application/x-pdf' ||
+    fileHasExtension(file, ['.pdf']);
+}
+
 function getAudioExtension(mimeType: string | undefined, fallback: string) {
   const normalized = (mimeType ?? '').toLowerCase();
 
@@ -339,6 +346,7 @@ export default function Home() {
   const step5Ref = useRef<HTMLDivElement>(null);
   const step6Ref = useRef<HTMLDivElement>(null);
   const step7Ref = useRef<HTMLDivElement>(null);
+  const pdfUploadInputRef = useRef<HTMLInputElement>(null);
   const podcastUploadInputRef = useRef<HTMLInputElement>(null);
   const musicUploadInputRef = useRef<HTMLInputElement>(null);
 
@@ -517,13 +525,25 @@ export default function Home() {
       fileHasExtension(file, ['.wav', '.m4a', '.aac']);
   }
 
+  function resetPdfInput() {
+    if (pdfUploadInputRef.current) {
+      pdfUploadInputRef.current.value = '';
+    }
+  }
+
+  function openPdfPicker() {
+    resetPdfInput();
+    pdfUploadInputRef.current?.click();
+  }
+
   async function handlePdfUpload(file: File) {
     if (!apiKey) { setToast('請先填入 Gemini API Key'); return; }
 
-    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+    if (!isPdfFile(file)) {
       const msg = '上傳檔案必須為 pdf';
       setStep1State({ status: 'error', error: msg });
       setToast(msg);
+      resetPdfInput();
       return;
     }
 
@@ -578,6 +598,7 @@ export default function Home() {
       loadHistory();
       setTimeout(() => step2Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep1State({ status: 'error', error: String(e) }); setToast('PDF 解析失敗：' + String(e)); }
+    finally { resetPdfInput(); }
   }
 
   async function handleGenerateScript() {
@@ -994,13 +1015,21 @@ export default function Home() {
     setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
     setPptxLoading(false); setRecordId('');
+    resetPdfInput();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault(); setDragging(false);
     const file = e.dataTransfer.files?.[0];
-    if (file?.type === 'application/pdf') handlePdfUpload(file);
+    if (!file) return;
+    if (isPdfFile(file)) {
+      void handlePdfUpload(file);
+      return;
+    }
+    const msg = '拖放檔案必須為 pdf';
+    setStep1State({ status: 'error', error: msg });
+    setToast(msg);
   }
 
   // shared input classes
@@ -1292,10 +1321,19 @@ export default function Home() {
           <div
             className={`border-2 border-dashed rounded-2xl p-7 text-center cursor-pointer transition-all ${dragging ? 'border-emerald-600 bg-emerald-900/10' : t.dropzone
               }`}
-            onClick={() => document.getElementById('pdf-input')?.click()}
+            onClick={openPdfPicker}
           >
-            <input id="pdf-input" type="file" accept=".pdf" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handlePdfUpload(f); }} />
+            <input
+              ref={pdfUploadInputRef}
+              id="pdf-input"
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              onChange={e => {
+                const f = e.target.files?.[0];
+                if (f) void handlePdfUpload(f);
+              }}
+            />
             {step1State.status === 'loading' ? (
               <LoadingBar message="正在解析 PDF 投影片..." dark={dark} />
             ) : pdfFile ? (
