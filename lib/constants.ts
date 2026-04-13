@@ -17,8 +17,8 @@ export const TEXT_MODEL_OPTIONS = [
 
 export const STEP71_MODEL_OPTIONS = [
   { id: 'gemini-31-pro', provider: 'gemini', model: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro' },
-  { id: 'gemini-3-flash', provider: 'gemini', model: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
-  { id: 'gemini-25-flash', provider: 'gemini', model: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash（預設）' },
+  { id: 'gemini-3-flash', provider: 'gemini', model: 'gemini-3-flash-preview', label: 'Gemini 3 Flash（預設）' },
+  { id: 'gemini-25-flash', provider: 'gemini', model: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
 ] as const;
 
 export const STEP41_MODEL_OPTIONS = STEP71_MODEL_OPTIONS;
@@ -44,8 +44,8 @@ export type MusicModelOption = typeof MUSIC_MODEL_OPTIONS[number]['value'];
 
 export const DEFAULT_TEXT_MODEL: TextModelId = 'custom-gemma-4-31b';
 export const DEFAULT_LOCAL_TEXT_MODEL: TextModelId = 'custom-gemma-4-31b';
-export const DEFAULT_STEP41_MODEL: Step41ModelId = 'gemini-25-flash';
-export const DEFAULT_STEP71_MODEL: Step71ModelId = 'gemini-25-flash';
+export const DEFAULT_STEP41_MODEL: Step41ModelId = 'gemini-3-flash';
+export const DEFAULT_STEP71_MODEL: Step71ModelId = 'gemini-3-flash';
 export const DEFAULT_MULTIMODAL_MODEL: Step41ModelId = DEFAULT_STEP41_MODEL;
 export const DEFAULT_TTS_MODEL: TtsModelOption = 'gemini-2.5-flash-preview-tts';
 export const DEFAULT_MUSIC_MODEL: MusicModelOption = 'lyria-3-pro-preview';
