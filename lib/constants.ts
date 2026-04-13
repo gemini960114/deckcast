@@ -150,7 +150,7 @@ export const DEFAULT_LYRICS_DURATION = '105';
 // ===== TTS Chunking Thresholds =====
 export const TTS_WARN_SEC    = 150;  // 2.5 分鐘：顯示提示
 export const TTS_LONG_SEC    = 240;  // 4 分鐘：顯示長篇提示
-export const TTS_CHUNK_CHARS = 1000;  // 後端每段台詞字數上限（≈ 4–5 分鐘）；實測校正值，視音質再微調
+export const TTS_CHUNK_CHARS = 800;   // 後端每段台詞字數上限（≈ 3–4 分鐘）；實測校正值，視音質再微調
 export const CHUNK_GAP_MS    = 800;  // chunk 間插入的固定靜音（ms）
 
 // ===== Media Upload Rules =====

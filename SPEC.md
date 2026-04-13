@@ -2,6 +2,12 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v13 補充亮點（2026-04-14，plan_O 內容語言強制約束強化）：
+1. **`buildLanguageBlock()` 強化**：移除 `if (language === 'zh-TW') return ''` 特例；四種語言（`zh-TW / en / ja / ko`）均輸出完整語言 block，新增「主體內容不得改用其他語言作為主要輸出」約束句。三種腳本模式（雙人對談、單人講解、單人說故事）均已呼叫此函式，自動同步受益。
+2. **新增 `buildLyricsLanguageBlock()`**（`lib/prompts.ts`，私有）：歌詞專用語言 block，比腳本更嚴格；刪除舊版「K-POP/J-POP 可保留少量混語」寬鬆句；分語言分支處理：`zh-TW / ja / ko` 明確禁止英文成為主體（含 `Do not use English as the primary language`），`en` 只要求英文為主體（不反向禁止，避免自相矛盾）。
+3. **`buildLyricsPrompt()` 修正**：移除 `if (lang === 'zh-TW') return base` 提前 return；改為一律執行 `return base + buildLyricsLanguageBlock(lang)`，四種語言全部附加語言 block，不再有任何特例路徑。
+4. **資料流不變**：`app/api/generate-script/route.ts` / `app/api/generate-lyrics/route.ts` / `app/page.tsx` 均已正確傳遞 `contentLanguage`，本次無需修改。
+
 ### ✨ v12 補充亮點（2026-04-14，plan_K PPTX/MP4 時序一致 + plan_L 下載命名）：
 1. **PPTX/MP4 轉場時序統一（plan_K）**：新增 `resolveEffectiveTransitionSec()` 共用函式，PPTX 的 `buildTransitionAdjustedTimings()` 與 MP4 的 xfade offset 均透過此函式計算有效轉場時長；原始 timings 保留於 state / IndexedDB，調整後的 timings 僅在 PPTX 輸出時套用，確保 PPTX 換頁時間點與 MP4 影片在「新頁完全可見」的語意上完全一致。
 2. **MP4 xfade offset 公式修正（plan_K）**：xfade offset 改為直接公式 `offset = timings[i].endSec - fadeDur`（不再累加），解決舊版 cumulative offset 在負 offset 頁面後段誤差累積導致影片錯位的問題；每張投影片的 FFmpeg input `-t` 包含自身時長加上所有後續轉場的 carry-in 時間，確保 xfade 不提早截斷。
@@ -33,7 +39,7 @@
 7. **延後項目（J6）**：Step 4 / Step 7 的 alignment prompt 語言化（`align-podcast` / `align-music` route 及前端 API 呼叫需同步修改）列為後續優化，本期不納入，以控制回歸範圍。
 
 ### ✨ v08 補充亮點（2026-04-12）：
-1. **TTS 分段生成（plan_I / plan_I01）**：新增 `TTS_CHUNKING_ENABLED` feature flag；啟用後，腳本超過 `TTS_CHUNK_CHARS`（預設 1000）字元時以投影片邊界自動切段，各段 PCM 串接後插入 800ms（`CHUNK_GAP_MS`）靜音，解決 Gemini TTS 長篇破音問題；duo 與 solo 均套用。新增 `createSilence()`、`trimLeadingSilence()`、`trimTrailingSilence()`、`concatPcmChunks()` 整條 `Uint8Array` PCM 鏈，解決 TypeScript 5.x `Buffer<ArrayBufferLike>` 型別錯誤。
+1. **TTS 分段生成（plan_I / plan_I01）**：新增 `TTS_CHUNKING_ENABLED` feature flag；啟用後，腳本超過 `TTS_CHUNK_CHARS`（預設 800，原 1000，2026-04-14 調降）字元時以投影片邊界自動切段，各段 PCM 串接後插入 800ms（`CHUNK_GAP_MS`）靜音，解決 Gemini TTS 長篇破音問題；duo 與 solo 均套用。新增 `createSilence()`、`trimLeadingSilence()`、`trimTrailingSilence()`、`concatPcmChunks()` 整條 `Uint8Array` PCM 鏈，解決 TypeScript 5.x `Buffer<ArrayBufferLike>` 型別錯誤。
 2. **TTS 自動重試**：`callTtsApi()` 對 Gemini TTS 500 系列錯誤最多重試 2 次（間隔 2 秒），4xx 錯誤直接拋出不重試。
 3. **`extractSoloScript()` 空白行修正**：solo 模式下 `Speaker 1:` 後無內容的行在 `.map()` 後加 `.filter(Boolean)`，避免空字串被 `join('\n')` 串成空白行送入 TTS，消除非預期停頓。
 4. **`calcPodcastTimings()` 比例修正**：改用 `slideTexts.slice(0, slideCount)` 計算 `totalChars`，避免腳本 `投影片` 標記數量多於 PDF 頁數時分母被稀釋，導致所有投影片提前換頁。

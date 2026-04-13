@@ -176,10 +176,10 @@ export const PARSE_PDF_PROMPT =
 
 /** 產生放在 narration prompt 最前面的語言指定區塊 */
 function buildLanguageBlock(language: ContentLanguage): string {
-  if (language === 'zh-TW') return ''; // 預設語言不需要額外指定
   const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[language];
   return `【語言指定】
 以下所有實際講話內容必須使用 ${langLabel} 撰寫。
+主體內容不得改用其他語言作為主要輸出；可保留極少量不可避免的專有名詞原文。
 但以下固定結構標記不論內容語言為何，均必須維持原樣，不可翻譯：
 - 風格:
 - 投影片 N:（N 為數字）
@@ -190,6 +190,30 @@ function buildLanguageBlock(language: ContentLanguage): string {
 正確範例：投影片 1:（即使內容是 ${langLabel} 也一樣）
 Do not translate these markers into any other language.
 
+`;
+}
+
+/** 產生放在 lyrics prompt 結尾的語言指定區塊（比腳本更嚴格，en 與非英語分支處理） */
+function buildLyricsLanguageBlock(language: ContentLanguage): string {
+  const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[language];
+
+  if (language === 'en') {
+    return `\n【歌詞語言指定】
+所有實際演唱歌詞必須使用 ${langLabel} 撰寫。
+${langLabel} 必須是主體語言；可保留極少量不可避免的專有名詞、品牌名、術語原文，但不可讓其他語言佔主體。
+段落標記如 [Verse 1] [Slide 2]、[Chorus]、[Guitar Solo] 必須維持既有格式，不可翻譯。
+不可唱的提示（以中括號標示）維持原有格式，不影響實際演唱內容的語言要求。
+`;
+  }
+
+  // zh-TW / ja / ko：明確禁止英文成為主體
+  return `\n【歌詞語言指定】
+所有實際演唱歌詞必須使用 ${langLabel} 撰寫。
+${langLabel} 必須是主體語言，不可讓英文成為主體歌詞。
+可保留極少量不可避免的專有名詞、品牌名、術語原文，但外語不可佔主體。
+段落標記如 [Verse 1] [Slide 2]、[Chorus]、[Guitar Solo] 必須維持既有格式，不可翻譯。
+不可唱的提示（以中括號標示）維持原有格式，不影響實際演唱內容的語言要求。
+Do not use English as the primary language for the sung lyrics.
 `;
 }
 
@@ -446,10 +470,5 @@ export function buildLyricsPrompt(styleLabel: string, duration: string, language
   const lang = language ?? DEFAULT_CONTENT_LANGUAGE;
   const base = LYRICS_PROMPT_TIMED(styleLabel, totalSec);
 
-  if (lang === 'zh-TW') return base;
-
-  const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[lang];
-  const langBlock = `\n【歌詞語言指定】\n所有實際演唱歌詞必須使用 ${langLabel} 撰寫。\n段落標記如 [Verse 1] [Slide 2] 必須維持既有格式，不可翻譯。\n主體語言應為 ${langLabel}；若音樂風格本身常見多語混唱（例如 K-POP、J-POP），可保留少量混語。\n`;
-
-  return base + langBlock;
+  return base + buildLyricsLanguageBlock(lang);
 }

@@ -75,7 +75,7 @@
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
 - 下載時會保留與原始 blob 相符的副檔名
 - 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
-- **TTS 分段生成**（需啟用 `TTS_CHUNKING_ENABLED=true`）：長篇腳本（duo / solo 均支援）以投影片邊界自動切段、分次呼叫 TTS，再將各段 PCM 串接並插入 800ms 靜音；解決 Gemini TTS 長段破音問題。每段字數上限由 `TTS_CHUNK_CHARS`（預設 1000）控制，切段失敗時最多自動重試 2 次
+- **TTS 分段生成**（需啟用 `TTS_CHUNKING_ENABLED=true`）：長篇腳本（duo / solo 均支援）以投影片邊界自動切段、分次呼叫 TTS，再將各段 PCM 串接並插入 800ms 靜音；解決 Gemini TTS 長段破音問題。每段字數上限由 `TTS_CHUNK_CHARS`（預設 800）控制，切段失敗時最多自動重試 2 次
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
@@ -198,12 +198,13 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 | 選項 | 說明 |
 |---|---|
-| 繁體中文（zh-TW）| 預設值，行為與舊版完全一致 |
+| 繁體中文（zh-TW）| 預設值 |
 | English | 英文內容生成 |
 | 日本語 | 日文內容生成 |
 | 한국어 | 韓文內容生成 |
 
 **作用範圍**：同時影響 Podcast 文稿（Step 2）、歌詞（Step 5）、及對應的 TTS / 音樂生成（Step 3 / 6）。  
+**語言強制約束**：四種語言皆有明確的語言指定 block，主體內容不得改用其他語言作為主要輸出；歌詞 prompt 另有獨立且更嚴格的語言 block，`zh-TW / ja / ko` 明確禁止英文成為主體歌詞，`en` 則要求英文為主體而非反向禁止。  
 **結構標記不會隨語言改變**：不論選哪種語言，`風格:` / `投影片 N:` / `Speaker 1:` / `Speaker 2:` / `[Verse N] [Slide N]` 標記均維持固定格式，確保 parser 與後續流程穩定。  
 **本地 LLM 注意事項**：非繁中內容建議搭配 Gemini 文字模型使用；本地 `Gemma 4 31B (Custom)` 在非繁中時可能有標記翻譯的風險，UI 會顯示提示。  
 **切換語言後**：已生成的文稿與歌詞不會自動清除，若需要對齊新語言請手動重新生成。

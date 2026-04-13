@@ -163,7 +163,7 @@
 
 ### 11.1 TTS 分段生成核心（`app/api/generate-podcast/route.ts`、`lib/constants.ts`）
 - [x] **`TTS_CHUNKING_ENABLED` feature flag**：server-side `process.env.TTS_CHUNKING_ENABLED === 'true'` 控制，`false` 維持現況不分段；duo / solo 均套用
-- [x] **`TTS_CHUNK_CHARS = 1000`**：每段台詞字數上限（≈ 4–5 分鐘），以投影片邊界為優先切點
+- [x] **`TTS_CHUNK_CHARS = 800`**：每段台詞字數上限（≈ 3–4 分鐘），以投影片邊界為優先切點（2026-04-14 由 1000 調降為 800，實測音質校正值）
 - [x] **`CHUNK_GAP_MS = 800`**：chunk 間插入固定靜音（ms），作為常數方便調整
 - [x] **`splitScriptIntoChunks()`**：兩層切分邏輯；Layer 1 以 `投影片 N：` 邊界切分並累積字數，Layer 2 在單頁超長時以 Speaker 行細切，單行超長則拋出 `CHUNK_TOO_LONG` 400 錯誤
 - [x] **`createSilence(durationMs, sampleRate): Uint8Array`**：生成全零 Int16 LE PCM 靜音段
@@ -333,3 +333,21 @@
 ### 15.5 `VideoExportBlock` 元件更新（`components/VideoExportBlock.tsx`）
 - [x] **新增 `displayName?: string` prop**：按鈕文字改用 `displayName ?? filename`，UI 顯示名稱與下載檔名完全解耦
 - [x] **`filename` 與 `triggerDownload` 調用不變**：`filename` 仍作為實際下載名稱，快取與下載邏輯完全相容
+
+## 16. 2026-04-14 plan_O 完成項目（內容語言強制約束強化）
+
+### 16.1 `buildLanguageBlock()` 強化（`lib/prompts.ts`）
+- [x] **移除 `zh-TW` 空字串特例**：原本 `if (language === 'zh-TW') return ''` 導致繁中腳本缺少語言指定，現改為四種語言均輸出完整語言 block
+- [x] **加入主體語言禁止換語約束**：block 內新增「主體內容不得改用其他語言作為主要輸出；可保留極少量不可避免的專有名詞原文」，升級約束強度
+- [x] **三種腳本模式自動受益**：`DUO_PODCAST_PROMPT_TEMPLATE` / `SOLO_EXPLAINER_PROMPT_TEMPLATE` / `SOLO_STORY_PROMPT_TEMPLATE` 均已呼叫 `buildLanguageBlock()`，Step 1 修正後三者同步生效，不需個別修改
+
+### 16.2 `buildLyricsLanguageBlock()` 新增（`lib/prompts.ts`）
+- [x] **新增獨立歌詞語言 block helper**（私有 function，不 export）：歌詞規則比腳本更嚴格，拆出獨立 helper 避免影響腳本 prompt
+- [x] **刪除「K-POP / J-POP 可保留少量混語」寬鬆句**：改為「外語不可佔主體」，減少模型自由漂向英文的空間
+- [x] **`zh-TW / ja / ko` 分支**：明確加入「不可讓英文成為主體歌詞」與 `Do not use English as the primary language for the sung lyrics.`
+- [x] **`en` 分支**：只要求英文為主體，不加「禁止英文」句，避免英文模式自相矛盾
+
+### 16.3 `buildLyricsPrompt()` 修正（`lib/prompts.ts`）
+- [x] **移除 `zh-TW` 提前 return**：原本 `if (lang === 'zh-TW') return base` 跳過語言 block，現改為一律附加 `buildLyricsLanguageBlock(lang)`
+- [x] **移除舊版內嵌 langBlock 字串**：含「可少量混語」的舊版字串一併刪除，改為呼叫新 helper
+- [x] **四種語言策略一致**：全部走 `base + buildLyricsLanguageBlock(lang)`，不再有任何語言走特例路徑
