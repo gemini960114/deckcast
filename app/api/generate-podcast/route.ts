@@ -271,13 +271,16 @@ export async function POST(req: NextRequest) {
   try {
     logUsage(getEmailFromRequest(req), 'generate-podcast');
     const ai = getAI(req);
-    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo', contentLanguage } = await req.json();
+    const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo', contentLanguage, ttsGenerationMode = 'single' } = await req.json();
     const modelName = resolveTtsModel(ttsModel);
     const isDuo = narrationMode === 'duo';
     console.log(`[generate-podcast] contentLanguage=${contentLanguage ?? 'zh-TW'} narrationMode=${narrationMode}`);
 
-    // I5: Feature flag — split or passthrough
-    const chunkingEnabled = process.env.TTS_CHUNKING_ENABLED === 'true';
+    // I5: User choice drives chunking; env flag acts as server capability guard only.
+    // Frontend hides the 'chunked' option when ttsChunkingEnabled=false, so this
+    // fallback only triggers if the request bypasses the UI (e.g. manual API call).
+    const serverAllowsChunking = process.env.TTS_CHUNKING_ENABLED === 'true';
+    const chunkingEnabled = ttsGenerationMode === 'chunked' && serverAllowsChunking;
 
     let chunks: string[];
     try {

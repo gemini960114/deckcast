@@ -2,6 +2,8 @@ export type NarrationMode = 'duo' | 'solo_explainer' | 'solo_story';
 
 export type ContentLanguage = 'zh-TW' | 'en' | 'ja' | 'ko';
 
+export type TtsGenerationMode = 'single' | 'chunked';
+
 export interface SlideTiming {
   slideIndex: number;
   startSec: number;

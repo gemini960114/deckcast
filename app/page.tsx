@@ -9,7 +9,7 @@ import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuratio
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, StepState, SlideTimings } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, StepState, SlideTimings, TtsGenerationMode } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -369,6 +369,7 @@ export default function Home() {
   const [pptxLoading, setPptxLoading] = useState(false);
   const [videoExportEnabled, setVideoExportEnabled] = useState(false);
   const [ttsChunkingEnabled, setTtsChunkingEnabled] = useState(false);
+  const [ttsGenerationMode, setTtsGenerationMode] = useState<TtsGenerationMode>('single');
   const [toast, setToast] = useState('');
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [history, setHistory] = useState<GenerationRecord[]>([]);
@@ -700,7 +701,7 @@ export default function Home() {
     if (!script) return; setStep3State({ status: 'loading' });
     try {
       setPodcastInputMode('api');
-      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel, narrationMode, contentLanguage });
+      const res = await apiFetch('/api/generate-podcast', { script, voice1, voice2, ttsModel, narrationMode, contentLanguage, ttsGenerationMode });
       if (!res.ok) throw new Error(await res.text());
       const blob = await res.blob();
       resetPodcastDerivedState();
@@ -1492,6 +1493,16 @@ export default function Home() {
                   : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
                 <div className="space-y-3">
+                  {ttsChunkingEnabled && (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className={`text-xs whitespace-nowrap ${t.faint}`}>TTS 生成模式</label>
+                      <select value={ttsGenerationMode} onChange={e => setTtsGenerationMode(e.target.value as TtsGenerationMode)} className={selectCls}>
+                        <option value="single">不分段（音色較一致）</option>
+                        <option value="chunked">自動分段（較不易破音）</option>
+                      </select>
+                      <p className={`text-[11px] ${t.faint}`}>短稿通常建議不分段；長稿若出現破音或失敗，可改用自動分段。</p>
+                    </div>
+                  )}
                   {(() => {
                     if (!script) return null;
                     // estimateChunkCount is a UI approximation (total chars ÷ TTS_CHUNK_CHARS);
@@ -1499,19 +1510,19 @@ export default function Home() {
                     const speechSec  = estimateTtsDuration(script, narrationMode);
                     const chunkCount = estimateChunkCount(script, TTS_CHUNK_CHARS);
                     const pauseSec   = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
-                    const estSec     = speechSec + (ttsChunkingEnabled ? pauseSec : 0);
+                    const estSec     = speechSec + (ttsGenerationMode === 'chunked' ? pauseSec : 0);
                     const estMin     = Math.ceil(estSec * 0.8 / 60);  // 實測約為估算值的 80%
                     if (estSec >= TTS_LONG_SEC) {
                       return (
                         <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-amber-900/30 border-amber-700/60 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
-                          ⚠️ 長篇腳本（約 {estMin} 分鐘），{ttsChunkingEnabled ? '將自動分段生成，預計需要較久時間，各段間有短暫停頓。' : '後段音質可能明顯劣化，建議上傳外部音訊。'}
+                          ⚠️ 長篇腳本（約 {estMin} 分鐘），{ttsGenerationMode === 'chunked' ? '將自動分段生成，預計需要較久時間，各段間有短暫停頓。' : '後段音質可能明顯劣化，建議上傳外部音訊或改用自動分段。'}
                         </p>
                       );
                     }
                     if (estSec >= TTS_WARN_SEC) {
                       return (
                         <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-blue-900/30 border-blue-700/60 text-blue-300' : 'bg-blue-50 border-blue-300 text-blue-800'}`}>
-                          ℹ️ 腳本較長（約 {estMin} 分鐘），{ttsChunkingEnabled ? '將自動分段生成，投影片換頁處可能有輕微停頓感。' : '後段音質可能輕微劣化。'}
+                          ℹ️ 腳本較長（約 {estMin} 分鐘），{ttsGenerationMode === 'chunked' ? '將自動分段生成，投影片換頁處可能有輕微停頓感。' : '後段音質可能輕微劣化。'}
                         </p>
                       );
                     }

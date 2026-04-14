@@ -2,6 +2,13 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v14 補充亮點（2026-04-14，plan_N TTS 生成模式使用者選項）：
+1. **`TtsGenerationMode` 新型別**（`lib/types.ts`）：`'single' | 'chunked'`，代表使用者選擇的 TTS 生成策略。
+2. **Step 3 UI 新增 TTS 生成模式下拉**（`app/page.tsx`）：只在 `podcastInputMode === 'api' && ttsChunkingEnabled` 時顯示；選項 `不分段（音色較一致）`（預設 `single`）與 `自動分段（較不易破音）`（`chunked`）；`ttsChunkingEnabled=false` 時整個欄位隱藏。
+3. **警示文案改由 `ttsGenerationMode` 驅動**：Step 3 長稿警示文案（`>= TTS_LONG_SEC` / `>= TTS_WARN_SEC`）改為依使用者目前選擇動態更新，取代舊版以系統 flag `ttsChunkingEnabled` 決定文案的方式。
+4. **後端改由 request body 決定分段**（`app/api/generate-podcast/route.ts`）：解構新增 `ttsGenerationMode`（預設 `'single'`）；`serverAllowsChunking`（env flag）降為後端防呆 fallback，正常情況前端不會送出 `chunked`（選單在 `ttsChunkingEnabled=false` 時已隱藏）。
+5. **`ttsChunkingEnabled` 語意降級**：原本影響分段決策的 server flag，現在只作為「是否顯示 TTS 生成模式選單」的 UI 能力旗標，不再直接控制後端行為。
+
 ### ✨ v13 補充亮點（2026-04-14，plan_O 內容語言強制約束強化）：
 1. **`buildLanguageBlock()` 強化**：移除 `if (language === 'zh-TW') return ''` 特例；四種語言（`zh-TW / en / ja / ko`）均輸出完整語言 block，新增「主體內容不得改用其他語言作為主要輸出」約束句。三種腳本模式（雙人對談、單人講解、單人說故事）均已呼叫此函式，自動同步受益。
 2. **新增 `buildLyricsLanguageBlock()`**（`lib/prompts.ts`，私有）：歌詞專用語言 block，比腳本更嚴格；刪除舊版「K-POP/J-POP 可保留少量混語」寬鬆句；分語言分支處理：`zh-TW / ja / ko` 明確禁止英文成為主體（含 `Do not use English as the primary language`），`en` 只要求英文為主體（不反向禁止，避免自相矛盾）。

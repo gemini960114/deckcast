@@ -75,7 +75,11 @@
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
 - 下載時會保留與原始 blob 相符的副檔名
 - 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
-- **TTS 分段生成**（需啟用 `TTS_CHUNKING_ENABLED=true`）：長篇腳本（duo / solo 均支援）以投影片邊界自動切段、分次呼叫 TTS，再將各段 PCM 串接並插入 800ms 靜音；解決 Gemini TTS 長段破音問題。每段字數上限由 `TTS_CHUNK_CHARS`（預設 800）控制，切段失敗時最多自動重試 2 次
+- **TTS 生成模式（使用者可選）**：Step 3 API 生成區提供下拉選單，讓使用者選擇生成策略：
+  - `不分段（音色較一致）`（預設）：整段腳本一次送 TTS，聲音連貫；長稿後段音質可能略降
+  - `自動分段（較不易破音）`：長篇腳本以投影片邊界自動切段，各段 PCM 串接並插入 800ms 靜音，解決破音問題
+  - 選單只在 `TTS_CHUNKING_ENABLED=true`（server 已開啟分段功能）時顯示；`false` 時整個欄位隱藏，預設不分段
+  - 每段字數上限由 `TTS_CHUNK_CHARS`（預設 800）控制，切段失敗時最多自動重試 2 次
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
@@ -354,7 +358,7 @@ TTS_CHUNKING_ENABLED=false
 - `LOCAL_LLM_LABEL` 為 UI 顯示名稱；例如你可以把 `gemma-4-31B-it` 顯示為 `Gemma 4 31B (Custom)`
 - `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出功能；需同時設定 `NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true`（build-time）
 - `VIDEO_FFMPEG_BIN` 僅 **Windows 本地開發** 時需要，填入 ffmpeg.exe 所在目錄；Linux / Docker / Cloud Run 留空，程式直接呼叫系統 `ffmpeg`
-- `TTS_CHUNKING_ENABLED=true` 啟用 TTS 分段生成，解決長篇腳本破音問題；`false` 為現況行為（不分段）。Cloud Run 部署時透過 `_TTS_CHUNKING_ENABLED` substitution 傳入
+- `TTS_CHUNKING_ENABLED=true` 啟用 TTS 分段生成功能；`false`（預設）時 Step 3 不顯示 TTS 生成模式選單，一律不分段。使用者的最終選擇（分段 / 不分段）在 Step 3 UI 控制，env flag 僅作為 server 能力開關。Cloud Run 部署時透過 `_TTS_CHUNKING_ENABLED` substitution 傳入
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---

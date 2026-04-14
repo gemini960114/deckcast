@@ -351,3 +351,25 @@
 - [x] **移除 `zh-TW` 提前 return**：原本 `if (lang === 'zh-TW') return base` 跳過語言 block，現改為一律附加 `buildLyricsLanguageBlock(lang)`
 - [x] **移除舊版內嵌 langBlock 字串**：含「可少量混語」的舊版字串一併刪除，改為呼叫新 helper
 - [x] **四種語言策略一致**：全部走 `base + buildLyricsLanguageBlock(lang)`，不再有任何語言走特例路徑
+
+## 17. 2026-04-14 plan_N 完成項目（TTS 生成模式使用者選項）
+
+### 17.1 型別擴充（`lib/types.ts`）
+- [x] **新增 `TtsGenerationMode` type**：`'single' | 'chunked'`，代表使用者選擇的 TTS 生成策略
+
+### 17.2 前端狀態與 UI（`app/page.tsx`）
+- [x] **新增 `ttsGenerationMode` state**：`useState<TtsGenerationMode>('single')`，預設不分段
+- [x] **Step 3 新增 TTS 生成模式下拉選單**：條件 `podcastInputMode === 'api' && ttsChunkingEnabled`；包含「不分段（音色較一致）」與「自動分段（較不易破音）」兩個選項；附輔助說明小字
+- [x] **`ttsChunkingEnabled=false` 時整個欄位隱藏**：不顯示殘缺的單選下拉，UX 更乾淨
+- [x] **Step 3 警示文案改由 `ttsGenerationMode` 驅動**：長稿（`>= TTS_LONG_SEC`）與中稿（`>= TTS_WARN_SEC`）提示均依使用者選擇動態更新，取代原本固定依 `ttsChunkingEnabled` 判斷的版本
+- [x] **`handleGeneratePodcast()` payload 加入 `ttsGenerationMode`**：呼叫 `/api/generate-podcast` 時一併帶入使用者選擇
+
+### 17.3 後端修正（`app/api/generate-podcast/route.ts`）
+- [x] **request body 解構加入 `ttsGenerationMode`**：預設 `'single'`，向下相容舊呼叫
+- [x] **分段決策改由 `ttsGenerationMode` 主導**：`chunkingEnabled = ttsGenerationMode === 'chunked' && serverAllowsChunking`
+- [x] **`serverAllowsChunking`（env flag）降為後端防呆**：正常情況前端已隱藏選單，env flag 只防手改 request 或未來非 UI caller
+
+### 17.4 未做（v1 明確延後）
+- [ ] generation record 儲存 `ttsGenerationMode`（載入歷史紀錄時還原模式選擇）
+- [ ] loading 文案依模式更新
+- [ ] 升級為雙選卡片 UI
