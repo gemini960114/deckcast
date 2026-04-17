@@ -2,6 +2,15 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v15 補充亮點（2026-04-17，plan_D 生成後可手動編輯腳本）：
+1. **`isEditingScript` / `scriptDraft` state**（`app/page.tsx`）：新增兩個 state 管理腳本編輯模式；`scriptDraft` 為暫存草稿，不影響 live `script`，取消時零成本清除。
+2. **三個 handler**（`app/page.tsx`）：`handleStartScriptEdit()`（複製 script → draft，進入編輯）/ `handleCancelScriptEdit()`（清空 draft，不動正式腳本）/ `handleSaveScriptEdit()`（draft 寫回 script，清失效下游，更新 `scriptGeneratedAt`，同步 IndexedDB）。
+3. **失效鏈清除**：儲存後一律清 Podcast 音訊、PPTX、SRT、timings、diagnostics、video（呼叫 `resetPodcastDerivedState()` + `setPodcastBlob(null)` + Step 3 / 4 state reset）；`duo` 模式才額外清 lyrics / lyricsGeneratedAt / musicBlob 及整條 music chain（呼叫 `resetMusicDerivedState()` + Step 5 / 6 / 7 state reset）；`solo_*` 模式不清 lyrics / music 系列。
+4. **`scriptGeneratedAt` 同步更新**：手動儲存後更新為當下時間，使下載命名時間標籤反映最新版本，歷史紀錄不沿用舊 LLM 生成時間。
+5. **Step 2 UI 改版**：正常模式加「編輯腳本」ActionBtn；編輯模式切換為固定高度 `<textarea>`（`min-h-[320px] max-h-[50vh]`，可捲動），含儲存警示小字與「儲存修改」/「取消」按鈕。
+6. **Step 3~7 編輯期間全部 disabled**：所有 StepCard 的 `disabled` 條件加入 `|| isEditingScript`，防止 draft 與 live script 並存時操作後續流程。
+7. **僅改 `app/page.tsx`**：不需修改 `lib/prompts.ts` / `lib/types.ts` / `lib/db.ts` / `app/api/generate-script/route.ts`，最小範圍實作。
+
 ### ✨ v14 補充亮點（2026-04-14，plan_N TTS 生成模式使用者選項）：
 1. **`TtsGenerationMode` 新型別**（`lib/types.ts`）：`'single' | 'chunked'`，代表使用者選擇的 TTS 生成策略。
 2. **Step 3 UI 新增 TTS 生成模式下拉**（`app/page.tsx`）：只在 `podcastInputMode === 'api' && ttsChunkingEnabled` 時顯示；選項 `不分段（音色較一致）`（預設 `single`）與 `自動分段（較不易破音）`（`chunked`）；`ttsChunkingEnabled=false` 時整個欄位隱藏。

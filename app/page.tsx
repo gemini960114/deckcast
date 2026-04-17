@@ -9,7 +9,7 @@ import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuratio
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, StepState, SlideTimings, TtsGenerationMode } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, NarrationLengthPreset, StepState, SlideTimings, TtsGenerationMode } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -22,6 +22,7 @@ import {
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
   TTS_WARN_SEC, TTS_LONG_SEC, TTS_CHUNK_CHARS, CHUNK_GAP_MS,
   DEFAULT_CONTENT_LANGUAGE, CONTENT_LANGUAGE_OPTIONS,
+  DEFAULT_NARRATION_LENGTH_PRESET, NARRATION_LENGTH_PRESETS,
   TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC,
 } from '@/lib/constants';
 import { estimateTtsDuration, estimateChunkCount } from '@/lib/ttsEstimate';
@@ -326,6 +327,8 @@ export default function Home() {
   const [voice2, setVoice2] = useState<string>(DEFAULT_VOICE2);
   const [narrationMode, setNarrationMode] = useState<NarrationMode>('duo');
   const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(DEFAULT_CONTENT_LANGUAGE);
+  const [narrationLengthPreset, setNarrationLengthPreset] = useState<NarrationLengthPreset>(DEFAULT_NARRATION_LENGTH_PRESET);
+  const [narrationLengthNote, setNarrationLengthNote] = useState('');
   const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
@@ -375,6 +378,8 @@ export default function Home() {
   const [history, setHistory] = useState<GenerationRecord[]>([]);
   const [recordId, setRecordId] = useState('');
   const [dragging, setDragging] = useState(false);
+  const [isEditingScript, setIsEditingScript] = useState(false);
+  const [scriptDraft, setScriptDraft] = useState('');
 
   const step2Ref = useRef<HTMLDivElement>(null);
   const step3Ref = useRef<HTMLDivElement>(null);
@@ -542,6 +547,70 @@ export default function Home() {
     }
   }
 
+  function handleStartScriptEdit() {
+    setScriptDraft(script);
+    setIsEditingScript(true);
+  }
+
+  function handleCancelScriptEdit() {
+    setIsEditingScript(false);
+    setScriptDraft('');
+  }
+
+  async function handleSaveScriptEdit() {
+    const nextScript = scriptDraft.trim();
+    if (!nextScript) return;
+
+    const now = Date.now();
+
+    setScript(nextScript);
+    setScriptGeneratedAt(now);
+    setIsEditingScript(false);
+    setScriptDraft('');
+
+    // 清除 Podcast 下游
+    resetPodcastDerivedState();
+    setPodcastBlob(null);
+    setStep3State({ status: 'idle' });
+    setStep4State({ status: 'idle' });
+
+    // duo 模式才清歌詞 / 音樂鏈
+    if (narrationMode === 'duo') {
+      resetMusicDerivedState();
+      setLyrics('');
+      setLyricsGeneratedAt(null);
+      setMusicBlob(null);
+      setStep5State({ status: 'idle' });
+      setStep6State({ status: 'idle' });
+      setStep7State({ status: 'idle' });
+    }
+
+    if (recordId) {
+      await updateRecord(recordId, {
+        script: nextScript,
+        scriptGeneratedAt: now,
+        podcastBlob: undefined,
+        podcastPptxBlob: undefined,
+        podcastSrt: undefined,
+        podcastTimings: undefined,
+        podcastDiagnostics: undefined,
+        podcastVideoBlob: undefined,
+        ...(narrationMode === 'duo'
+          ? {
+              lyrics: undefined,
+              lyricsGeneratedAt: undefined,
+              musicBlob: undefined,
+              musicPptxBlob: undefined,
+              musicSrt: undefined,
+              musicTimings: undefined,
+              musicDiagnostics: undefined,
+              musicVideoBlob: undefined,
+            }
+          : {}),
+      }, normalizedOwnerEmail);
+    }
+  }
+
   function isMp3File(file: File) {
     const fileName = file.name.toLowerCase();
     return file.type === 'audio/mpeg' || file.type === 'audio/mp3' || fileName.endsWith('.mp3');
@@ -644,6 +713,8 @@ export default function Home() {
         ownerEmail: normalizedOwnerEmail,
         contentLanguage,
         narrationMode,
+        narrationLengthPreset,
+        narrationLengthNote,
         speaker1,
         speaker2,
         dialogueStyle,
@@ -687,12 +758,14 @@ export default function Home() {
         tone: tone || DEFAULT_TONE,
         textModel,
         contentLanguage,
+        narrationLengthPreset,
+        narrationLengthNote,
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const now = Date.now();
       setScript(data.script); setScriptGeneratedAt(now); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, scriptGeneratedAt: now, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { script: data.script, scriptGeneratedAt: now, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage, narrationLengthPreset, narrationLengthNote }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -984,6 +1057,8 @@ export default function Home() {
   function loadRecord(rec: GenerationRecord) {
     setContentLanguage(rec.contentLanguage ?? DEFAULT_CONTENT_LANGUAGE);
     setNarrationMode(rec.narrationMode ?? 'duo');
+    setNarrationLengthPreset(rec.narrationLengthPreset ?? DEFAULT_NARRATION_LENGTH_PRESET);
+    setNarrationLengthNote(rec.narrationLengthNote ?? '');
     if (rec.speaker1) setSpeaker1(rec.speaker1); else setSpeaker1(DEFAULT_SPEAKER1);
     if (rec.speaker2) setSpeaker2(rec.speaker2); else setSpeaker2(DEFAULT_SPEAKER2);
     if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); else setDialogueStyle(DEFAULT_DIALOGUE_STYLE);
@@ -1064,11 +1139,32 @@ export default function Home() {
     }, normalizedOwnerEmail);
   }
 
+  function handleNarrationLengthPresetChange(value: NarrationLengthPreset) {
+    setNarrationLengthPreset(value);
+    if (recordId) {
+      void updateRecord(recordId, {
+        narrationLengthPreset: value,
+        narrationLengthNote,
+      }, normalizedOwnerEmail);
+    }
+  }
+
+  function handleNarrationLengthNoteChange(value: string) {
+    setNarrationLengthNote(value);
+    if (recordId) {
+      void updateRecord(recordId, {
+        narrationLengthPreset,
+        narrationLengthNote: value,
+      }, normalizedOwnerEmail);
+    }
+  }
+
   function handleNewProject() {
     // Design intent: clear project content only, keep user preferences
     // (speaker, voice, style, model settings). Users expect their workflow
     // setup to persist across projects; only the content is project-specific.
     setContentLanguage(DEFAULT_CONTENT_LANGUAGE);
+    setNarrationLengthNote('');
     setPdfFile(null); setSlides(''); setScript(''); setLyrics('');
     setPodcastBlob(null); setMusicBlob(null); setPodcastPptxBlob(null); setMusicPptxBlob(null);
     setPodcastVideoBlob(null); setMusicVideoBlob(null);
@@ -1322,6 +1418,24 @@ export default function Home() {
               )}
               <p className={`mt-0.5 text-[10px] ${t.faint}`}>影響 Podcast 文稿、語音、歌詞與歌曲生成</p>
             </div>
+            <div>
+              <label className={labelCls}>旁白長度</label>
+              <select value={narrationLengthPreset} onChange={e => handleNarrationLengthPresetChange(e.target.value as NarrationLengthPreset)} className={selectCls}>
+                {NARRATION_LENGTH_PRESETS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>長度補充說明（選填）</label>
+              <input
+                type="text"
+                value={narrationLengthNote}
+                onChange={e => handleNarrationLengthNoteChange(e.target.value)}
+                placeholder="例如：前言精簡、案例頁詳細、最後一頁收短一點"
+                className={inputCls}
+              />
+            </div>
           </div>
 
           {/* Voices + music — 4 col */}
@@ -1447,8 +1561,29 @@ export default function Home() {
               : <ActionBtn onClick={handleGenerateScript}>{step2State.status === 'done' ? '重新生成文稿' : '生成文稿'}</ActionBtn>}
             {script && step2State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <TextBlock text={script} dark={dark} />
-                <DownloadChip label="script.txt" onClick={() => downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt'))} dark={dark} />
+                {isEditingScript ? (
+                  <>
+                    <textarea
+                      className={`w-full min-h-[320px] max-h-[50vh] overflow-y-auto rounded-xl border p-3 text-sm font-mono resize-none focus:outline-none ${dark ? 'bg-zinc-800 border-zinc-600 text-zinc-100' : 'bg-white border-zinc-300 text-zinc-900'}`}
+                      value={scriptDraft}
+                      onChange={e => setScriptDraft(e.target.value)}
+                    />
+                    <p className={`text-xs ${dark ? 'text-yellow-400' : 'text-yellow-600'}`}>⚠ 儲存後將清除已生成的 Podcast 音訊、簡報與字幕</p>
+                    {isDuo && <p className={`text-xs ${dark ? 'text-yellow-400' : 'text-yellow-600'}`}>⚠ duo 模式下也會清除歌詞與音樂相關成品</p>}
+                    <div className="flex gap-2">
+                      <ActionBtn onClick={handleSaveScriptEdit}>儲存修改</ActionBtn>
+                      <ActionBtn onClick={handleCancelScriptEdit}>取消</ActionBtn>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <TextBlock text={script} dark={dark} />
+                    <div className="flex gap-2 flex-wrap">
+                      <DownloadChip label="script.txt" onClick={() => downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt'))} dark={dark} />
+                      <ActionBtn onClick={handleStartScriptEdit}>編輯腳本</ActionBtn>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {step2State.error && <p className={errBox}>{step2State.error}</p>}
@@ -1457,7 +1592,7 @@ export default function Home() {
 
         {/* ── Step 3 ── */}
         <div ref={step3Ref}>
-          <StepCard step={3} title={isDuo ? '生成 Podcast 音訊' : narrationMode === 'solo_explainer' ? '生成講解音訊' : '生成敘事音訊'} state={step3State} disabled={!script} dark={dark}>
+          <StepCard step={3} title={isDuo ? '生成 Podcast 音訊' : narrationMode === 'solo_explainer' ? '生成講解音訊' : '生成敘事音訊'} state={step3State} disabled={!script || isEditingScript} dark={dark}>
             <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
               {[
                 { id: 'api' as const, title: 'API 生成', desc: '使用目前的Podcast生成流程' },
@@ -1591,7 +1726,7 @@ export default function Home() {
 
         {/* ── Step 4 ── */}
         <div ref={step4Ref}>
-          <StepCard step={4} title={isDuo ? '生成 Podcast 簡報 (AI 精準對齊)' : narrationMode === 'solo_explainer' ? '生成講解簡報（AI 精準對齊）' : '生成敘事簡報（AI 精準對齊）'} state={step4State} disabled={!podcastBlob || !script} dark={dark}>
+          <StepCard step={4} title={isDuo ? '生成 Podcast 簡報 (AI 精準對齊)' : narrationMode === 'solo_explainer' ? '生成講解簡報（AI 精準對齊）' : '生成敘事簡報（AI 精準對齊）'} state={step4State} disabled={!podcastBlob || !script || isEditingScript} dark={dark}>
             {step4State.status === 'loading'
               ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
               : (
@@ -1646,7 +1781,7 @@ export default function Home() {
 
         {/* ── Step 5 ── */}
         <div ref={step5Ref}>
-          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script} dark={dark}>
+          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script || isEditingScript} dark={dark}>
             {step5State.status === 'loading'
               ? <LoadingBar message="正在生成歌詞..." dark={dark} />
               : <ActionBtn onClick={handleGenerateLyrics}>{step5State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
@@ -1662,7 +1797,7 @@ export default function Home() {
 
         {/* ── Step 6 ── */}
         <div ref={step6Ref}>
-          <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics} dark={dark}>
+          <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics || isEditingScript} dark={dark}>
             <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
               {[
                 { id: 'api' as const, title: 'API 生成', desc: '使用目前的歌曲生成流程' },
@@ -1752,7 +1887,7 @@ export default function Home() {
 
         {/* ── Step 7 ── */}
         <div ref={step7Ref}>
-          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob} dark={dark}>
+          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob || isEditingScript} dark={dark}>
             {step7State.status === 'loading'
               ? <LoadingBar message="AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
               : <ActionBtn onClick={handleGenerateMusicPptx}>{step7State.status === 'done' ? '重新生成歌曲簡報' : '生成歌曲簡報'}</ActionBtn>}

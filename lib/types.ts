@@ -2,6 +2,8 @@ export type NarrationMode = 'duo' | 'solo_explainer' | 'solo_story';
 
 export type ContentLanguage = 'zh-TW' | 'en' | 'ja' | 'ko';
 
+export type NarrationLengthPreset = 'brief' | 'balanced' | 'detailed';
+
 export type TtsGenerationMode = 'single' | 'chunked';
 
 export interface SlideTiming {
@@ -59,6 +61,8 @@ export interface GenerationRecord {
   musicModel?: string;
   // Settings snapshot
   narrationMode?: NarrationMode;
+  narrationLengthPreset?: NarrationLengthPreset;
+  narrationLengthNote?: string;
   speaker1?: string;
   speaker2?: string;
   dialogueStyle?: string;

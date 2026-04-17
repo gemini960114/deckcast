@@ -373,3 +373,25 @@
 - [ ] generation record 儲存 `ttsGenerationMode`（載入歷史紀錄時還原模式選擇）
 - [ ] loading 文案依模式更新
 - [ ] 升級為雙選卡片 UI
+
+## 18. 2026-04-17 plan_D 完成項目（生成後可手動編輯腳本）
+
+### 18.1 State 新增（`app/page.tsx`）
+- [x] **`isEditingScript` state**：`useState(false)`，控制 Step 2 是否進入腳本編輯模式
+- [x] **`scriptDraft` state**：`useState('')`，編輯期間的暫存草稿，不影響 live `script`
+
+### 18.2 Handler 新增（`app/page.tsx`）
+- [x] **`handleStartScriptEdit()`**：將 `script` 複製至 `scriptDraft`，設 `isEditingScript = true`
+- [x] **`handleCancelScriptEdit()`**：清空 `scriptDraft`，設 `isEditingScript = false`，不修改正式腳本
+- [x] **`handleSaveScriptEdit()`**：將 `scriptDraft` 寫回 `script`，更新 `scriptGeneratedAt` 為當下時間，清除所有依賴腳本的下游產物，並同步寫入 IndexedDB
+  - 一律清除：Podcast 音訊（`podcastBlob`）、PPTX、SRT、timings、diagnostics、video（呼叫 `resetPodcastDerivedState()`）、Step 3 / Step 4 state
+  - `duo` 模式才清除：lyrics、lyricsGeneratedAt、musicBlob、及整條 music chain（呼叫 `resetMusicDerivedState()`）、Step 5 / 6 / 7 state
+  - `solo_explainer` / `solo_story` 模式不清 lyrics / music 系列產物
+  - IndexedDB 同步更新（`updateRecord`）
+
+### 18.3 Step 2 UI 改版（`app/page.tsx`）
+- [x] **正常模式**：TextBlock 唯讀 + 新增「編輯腳本」ActionBtn
+- [x] **編輯模式**：切換為固定高度 `<textarea>`（`min-h-[320px] max-h-[50vh]`，可捲動）+ 警示小字（儲存後清除 Podcast；duo 模式加一行提示清 music）+ 「儲存修改」/ 「取消」按鈕
+
+### 18.4 Step 3~7 鎖定（`app/page.tsx`）
+- [x] **編輯期間 Step 3~7 全部 disabled**：所有 StepCard 的 `disabled` 條件加入 `|| isEditingScript`，防止在 draft 與 live script 並存時誤操作後續流程

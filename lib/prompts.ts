@@ -1,5 +1,5 @@
-import { DEFAULT_SPEAKER2, CONTENT_LANGUAGE_PROMPT_LABEL, DEFAULT_CONTENT_LANGUAGE } from './constants';
-import type { NarrationMode, ContentLanguage } from './types';
+import { DEFAULT_SPEAKER2, CONTENT_LANGUAGE_PROMPT_LABEL, DEFAULT_CONTENT_LANGUAGE, NARRATION_LENGTH_PRESETS, DEFAULT_NARRATION_LENGTH_PRESET } from './constants';
+import type { NarrationMode, ContentLanguage, NarrationLengthPreset } from './types';
 
 export const GENERATE_MUSIC_SRT = `
 你將收到兩種資料：
@@ -193,6 +193,24 @@ Do not translate these markers into any other language.
 `;
 }
 
+/** 產生旁白長度要求區塊，插入三個 narration template */
+function buildNarrationLengthBlock(preset: NarrationLengthPreset, note?: string): string {
+  const promptLabel =
+    NARRATION_LENGTH_PRESETS.find(p => p.value === preset)?.promptLabel
+    ?? '每張投影片約 30 至 45 秒';
+
+  let block = `【長度要求】
+- 每張投影片腳本長度目標：${promptLabel}
+- 請依照內容複雜度自然微調：簡單頁可略短，重點頁可略長
+- 請維持整體節奏穩定，避免長度差異過大`;
+
+  if (note?.trim()) {
+    block += `\n\n【使用者補充偏好】\n${note.trim()}`;
+  }
+
+  return block;
+}
+
 /** 產生放在 lyrics prompt 結尾的語言指定區塊（比腳本更嚴格，en 與非英語分支處理） */
 function buildLyricsLanguageBlock(language: ContentLanguage): string {
   const langLabel = CONTENT_LANGUAGE_PROMPT_LABEL[language];
@@ -223,9 +241,11 @@ export const DUO_PODCAST_PROMPT_TEMPLATE = (vars: {
   dialogueStyle: string;
   tone: string;
   language: ContentLanguage;
+  narrationLengthPreset: NarrationLengthPreset;
+  narrationLengthNote: string;
 }) =>
   `${buildLanguageBlock(vars.language)}我想製作一個雙人對談節目，介紹以下每一張投影片內容。
-每張投影片請產出約 30 秒至 60 秒的對話腳本，並依照內容複雜度自然調整長度。
+${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote)}
 
 設定如下：
 - 主持人1 (Speaker 1) 的人設：${vars.speaker1}
@@ -264,9 +284,11 @@ export const SOLO_EXPLAINER_PROMPT_TEMPLATE = (vars: {
   dialogueStyle: string;
   tone: string;
   language: ContentLanguage;
+  narrationLengthPreset: NarrationLengthPreset;
+  narrationLengthNote: string;
 }) =>
   `${buildLanguageBlock(vars.language)}我想製作一段單人講解音訊，依序介紹以下每一張投影片內容。
-每張投影片請產出約 30 秒至 60 秒的單人講解腳本，並依照內容複雜度自然調整長度。
+${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote)}
 
 設定如下：
 - 講者人設：${vars.speaker1}
@@ -305,9 +327,11 @@ export const SOLO_STORY_PROMPT_TEMPLATE = (vars: {
   dialogueStyle: string;
   tone: string;
   language: ContentLanguage;
+  narrationLengthPreset: NarrationLengthPreset;
+  narrationLengthNote: string;
 }) =>
   `${buildLanguageBlock(vars.language)}我想製作一段單人敘事音訊，依序介紹以下每一張投影片內容。
-每張投影片請產出約 30 秒至 60 秒的單人敘事腳本，並依照內容複雜度自然調整長度。
+${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote)}
 
 設定如下：
 - 敘事者人設：${vars.speaker1}
@@ -347,8 +371,13 @@ export function buildNarrationPrompt(params: {
   dialogueStyle: string;
   tone: string;
   language?: ContentLanguage;
+  narrationLengthPreset?: NarrationLengthPreset;
+  narrationLengthNote?: string;
 }): string {
   const language = params.language ?? DEFAULT_CONTENT_LANGUAGE;
+  const resolvedPreset = params.narrationLengthPreset ?? DEFAULT_NARRATION_LENGTH_PRESET;
+  const resolvedNote = params.narrationLengthNote ?? '';
+
   switch (params.mode) {
     case 'duo':
       return DUO_PODCAST_PROMPT_TEMPLATE({
@@ -357,6 +386,8 @@ export function buildNarrationPrompt(params: {
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
         language,
+        narrationLengthPreset: resolvedPreset,
+        narrationLengthNote: resolvedNote,
       });
     case 'solo_explainer':
       return SOLO_EXPLAINER_PROMPT_TEMPLATE({
@@ -364,6 +395,8 @@ export function buildNarrationPrompt(params: {
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
         language,
+        narrationLengthPreset: resolvedPreset,
+        narrationLengthNote: resolvedNote,
       });
     case 'solo_story':
       return SOLO_STORY_PROMPT_TEMPLATE({
@@ -371,6 +404,8 @@ export function buildNarrationPrompt(params: {
         dialogueStyle: params.dialogueStyle,
         tone: params.tone,
         language,
+        narrationLengthPreset: resolvedPreset,
+        narrationLengthNote: resolvedNote,
       });
   }
 }

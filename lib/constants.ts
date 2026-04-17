@@ -118,7 +118,7 @@ export function isGeminiModel(model?: string): boolean {
 }
 
 // ===== Content Language =====
-import type { ContentLanguage } from './types';
+import type { ContentLanguage, NarrationLengthPreset } from './types';
 
 export const DEFAULT_CONTENT_LANGUAGE: ContentLanguage = 'zh-TW';
 
@@ -136,6 +136,19 @@ export const CONTENT_LANGUAGE_PROMPT_LABEL: Record<ContentLanguage, string> = {
   'ja':    'Japanese',
   'ko':    'Korean',
 };
+
+// ===== Narration Length =====
+export const DEFAULT_NARRATION_LENGTH_PRESET: NarrationLengthPreset = 'balanced';
+
+export const NARRATION_LENGTH_PRESETS: {
+  value: NarrationLengthPreset;
+  label: string;
+  promptLabel: string;
+}[] = [
+  { value: 'brief',    label: 'Brief（精簡）– 每頁約 15–25 秒',      promptLabel: '每張投影片約 15 至 25 秒' },
+  { value: 'balanced', label: 'Balanced（標準 ⭐）– 每頁約 30–45 秒', promptLabel: '每張投影片約 30 至 45 秒' },
+  { value: 'detailed', label: 'Detailed（詳細）– 每頁約 45–60 秒',   promptLabel: '每張投影片約 45 至 60 秒' },
+];
 
 // ===== Default Settings =====
 export const DEFAULT_SPEAKER1 = '男生為節目主持人 阿哲';

@@ -4,12 +4,12 @@ import { stripMarkdown } from '@/lib/stripMarkdown';
 import { unauthorizedResponse } from '@/lib/getAI';
 import { generateText } from '@/lib/llm';
 import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
-import type { NarrationMode, ContentLanguage } from '@/lib/types';
+import type { NarrationMode, ContentLanguage, NarrationLengthPreset } from '@/lib/types';
 
 export async function POST(req: NextRequest) {
   try {
     logUsage(getEmailFromRequest(req), 'generate-script');
-    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo', contentLanguage } = await req.json();
+    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo', contentLanguage, narrationLengthPreset, narrationLengthNote } = await req.json();
     const prompt = buildNarrationPrompt({
       mode: narrationMode as NarrationMode,
       speaker1,
@@ -17,6 +17,8 @@ export async function POST(req: NextRequest) {
       dialogueStyle,
       tone,
       language: contentLanguage as ContentLanguage | undefined,
+      narrationLengthPreset: narrationLengthPreset as NarrationLengthPreset | undefined,
+      narrationLengthNote,
     });
 
     const raw = await generateText(req, {
