@@ -694,8 +694,8 @@ export default function Home() {
       const arrayBuffer = await file.arrayBuffer();
       const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-      if (pdfDoc.numPages < 3 || pdfDoc.numPages > 15) {
-        const msg = '請上傳 3-15 頁的範圍簡報檔案';
+      if (pdfDoc.numPages < 3 || pdfDoc.numPages > 25) {
+        const msg = '請上傳 3-25 頁的範圍簡報檔案';
         setStep1State({ status: 'error', error: msg });
         setToast(msg);
         return;
@@ -1539,7 +1539,7 @@ export default function Home() {
                   <span className="text-xl">📄</span>
                 </div>
                 <p className={`text-xs font-semibold ${t.muted}`}>拖拽或點擊上傳 PDF</p>
-                <p className={`text-[11px] ${t.faint}`}>建議 3-15 頁</p>
+                <p className={`text-[11px] ${t.faint}`}>建議 3-25 頁</p>
               </div>
             )}
           </div>
