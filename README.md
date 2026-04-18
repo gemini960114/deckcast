@@ -100,6 +100,7 @@
 - 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
 - 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
 - PPTX 與 MP4 共用同一套 `resolveEffectiveTransitionSec()` 計算轉場時長，確保兩者時間語意完全一致：timings 代表「新頁完全可見的時間點」，在 PPTX 與 MP4 均成立
+- **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = SRT `[slide-N]` cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同，修復舊版 `images length must match timings length` 錯誤）
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
 - 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg
 - 點選「重新生成」會立即清除快取並重新合成；「重試」在錯誤後也會直接重跑，無需再次手動點擊
@@ -114,6 +115,9 @@
   - `4.2 / 7.2`：文字對齊（script/lyrics + SRT），可使用 Gemini 或本地 `gemma-4-31B-it`
 - **歌曲對齊核心設計**：Phase 1 採「lyrics-as-anchor」策略，歌詞文字是唯一正確來源，音訊只負責定位時間。
 - **Podcast 對齊核心設計**：以實際音訊為主、腳本為輔，先修正逐段字幕文字，再對應每張投影片開始的字幕 id。
+- **SRT 優先（SRT-first）人工確認流程**：對齊完成後，Step 4 / Step 7 下方會出現兩階段確認面板——先確認 SRT 字幕內容（`SrtReviewPanel`），再透過 `SrtCueEditor` 手動指定每張投影片的換頁起始字幕列（也可略過，使用 AI 自動對齊結果）；確認後才解鎖「生成 PPTX」按鈕。
+- **換頁標記縮圖預覽**：在 `SrtCueEditor` 點擊 slide chip 後，下方會即時顯示對應投影片縮圖（16:9，140×79px），方便確認畫面與字幕對應關係；縮圖延遲渲染（首次點擊才觸發），後續切換不重跑。
+- **PPTX / MP4 幀順序跟隨 cue 標記**：PPTX 與 MP4 的幀數均等於 SRT `[slide-N]` 標籤數（cue 數），而非 PDF 頁數；投影片順序依使用者 cue 的 `slideIndex` 重排，支援重複出現或以非 PDF 頁序呈現（`buildOrderedImagesFromTimings()`）。
 - 若 AI 配對失敗或不足，系統仍會退回 `lyrics/script weight fallback` 或均分 fallback，避免流程中斷。
 - PDF 每頁透過 Canvas 渲染為圖片，注入 XML 轉場效果 `<p:fade/>` 產生淡入特效。
 - 第一頁嵌入的音訊物件會額外補寫 `<p:timing>`，讓 PowerPoint 更接近「開場自動播放 + 跨頁持續播放」的行為。
@@ -122,8 +126,8 @@
 
 | 檔案 | 換頁時間計算方式 |
 |---|---|
-| `podcast.pptx` | 依據對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
-| `music.pptx` | 依據歌詞錨點、對齊後 SRT 與 `startSrtId` 推算換頁時間，並將音訊嵌入第一頁與補寫 timing XML |
+| `podcast.pptx` | 依據對齊後 SRT 與使用者 cue 標記（或 `startSrtId` 自動對齊）推算換頁時間；幀數 = cue 數；音訊嵌入第一頁並補寫 timing XML |
+| `music.pptx` | 依據歌詞錨點、對齊後 SRT 與使用者 cue 標記（或 `startSrtId` 自動對齊）推算換頁時間；幀數 = cue 數；音訊嵌入第一頁並補寫 timing XML |
 
 > 目前程式已補寫 PowerPoint timing XML，實務上更接近「第一頁自動播放、跨頁持續播放」。但不同版本的 PowerPoint 相容性仍可能有差異；若播放行為不如預期，保守做法仍是下載後將音訊與簡報同時啟動。
 
@@ -162,12 +166,14 @@ Step 2  生成 Podcast 文稿
 Step 3  生成或上傳 Podcast 音訊
   ↓
 Step 4  AI 聆聽並產生 Podcast 簡報 (精準對齊)
+          └─ 確認 SRT 字幕 → 手動標記換頁 cue（可選）→ 生成 PPTX
   ↓
 Step 5  生成歌詞
   ↓
 Step 6  生成或上傳歌曲音訊（約 30–180 秒）
   ↓
 Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
+          └─ 確認 SRT 字幕 → 手動標記換頁 cue（可選）→ 生成 PPTX
   ↓
 下載所有檔案
 ```

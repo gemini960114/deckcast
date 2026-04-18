@@ -10,12 +10,13 @@ import {
 } from '@/lib/srt';
 import {
   buildMusicFallbackTimingsByLyricsWeight,
+  buildSlideCuesFromVisualCueMatches,
   buildSlideTimingsFromSrtIds,
   buildVisualCueTimings,
   normalizeTimings,
   parseLyricSections,
 } from '@/lib/timing';
-import type { AlignMusicDiagnostics, LyricSection, MusicTransitionMatch, SrtEntry, VisualCueMatch, VisualCueTiming } from '@/lib/types';
+import type { AlignMusicDiagnostics, LyricSection, MusicTransitionMatch, SrtEntry, SrtSlideCue, VisualCueMatch, VisualCueTiming } from '@/lib/types';
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
 import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
@@ -350,7 +351,9 @@ export async function POST(req: NextRequest) {
       ? buildVisualCueTimings(lyricSections, visualCueMatches, srtEntries, totalDuration)
       : [];
 
-    return NextResponse.json({ srt, srtEntries, matches: visualCueMatches, timings, visualCueTimings, diagnostics });
+    const slideCues: SrtSlideCue[] = buildSlideCuesFromVisualCueMatches(visualCueMatches);
+
+    return NextResponse.json({ srt, srtEntries, slideCues, matches: visualCueMatches, timings, visualCueTimings, diagnostics });
   } catch (err: unknown) {
     if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
       return unauthorizedResponse(err);

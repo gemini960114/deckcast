@@ -6,8 +6,8 @@ import { FIND_PODCAST_TRANSITIONS_PROMPT, GENERATE_PODCAST_SRT, REFINE_PODCAST_S
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
 import { parseMusicSrtJson, repairSrtEntries, srtEntriesToText } from '@/lib/srt';
-import { buildPodcastFallbackTimingsByScriptWeight, buildSlideTimingsFromSrtIds, normalizeTimings } from '@/lib/timing';
-import type { AlignPodcastDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
+import { buildPodcastFallbackTimingsByScriptWeight, buildSlideCuesFromTransitionMatches, buildSlideTimingsFromSrtIds, normalizeTimings } from '@/lib/timing';
+import type { AlignPodcastDiagnostics, MusicTransitionMatch, SrtEntry, SrtSlideCue } from '@/lib/types';
 import { generateText } from '@/lib/llm';
 
 export const maxDuration = 300;
@@ -289,7 +289,9 @@ export async function POST(req: NextRequest) {
       timings = normalizeTimings([], slideCount, totalDuration);
     }
 
-    return NextResponse.json({ srt, timings, diagnostics });
+    const slideCues: SrtSlideCue[] = buildSlideCuesFromTransitionMatches(matches);
+
+    return NextResponse.json({ srt, srtEntries, slideCues, timings, diagnostics });
   } catch (err: unknown) {
     if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
       return unauthorizedResponse(err);

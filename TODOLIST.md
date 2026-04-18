@@ -469,3 +469,36 @@
 - [x] **`loadRecord()` 回填 `lyricsContentSource`**：`rec.lyricsContentSource ?? 'script'`
 - [x] **`handleNewProject()` 重置**：`setLyricsContentSource('script')`
 - [x] **`handleNarrationModeChange()` 重置 `musicVisualCueTimings`**（plan_B state 一致性）
+
+## 22. 2026-04-19 plan_D 第二批完成項目（SRT 優先架構 + 換頁標記編輯 + cue 排序輸出）
+
+### 22.1 SRT 優先架構（plan_D SRT-first）
+
+- [x] **`SrtEntry` / `SrtSlideCue` / `SlideCueEvent`** 型別（`lib/types.ts`）：`SrtSlideCue {srtId, slideIndex}`；`SlideCueEvent {srtId, slideIndex, startSec}`——兩階段 cue 資料模型
+- [x] **`buildSlideCueEvents()`**（`lib/timing.ts`）：依 `srtId` 將 `SrtSlideCue` 對應 `SrtEntry` 並組出 `SlideCueEvent[]`
+- [x] **`buildTimingsFromSlideCueEvents()`**（`lib/timing.ts`）：由 cue events 衍生 `SlideTimings`，N = cue 數 = SRT `[slide-N]` 標籤數
+- [x] **`SrtCueEditor`** 元件（`components/SrtCueEditor.tsx`）：Slide chip bar + SRT 列表；點擊 chip 後點選字幕列可指定換頁起始；再次點選同一列移除標記
+- [x] **`SrtReviewPanel`** 元件（`components/SrtReviewPanel.tsx`）：SRT 確認 + 換頁標記編輯整合面板；兩段解鎖：先確認 SRT → 再編輯 cue → 才能生成 PPTX
+- [x] **`app/page.tsx` 整合**：`podcastSlideCues` / `musicSlideCues` state；`buildPodcastPptxFromConfirmedSrt()` / `buildMusicPptxFromConfirmedSrt()` 函式當 `slideCues.length > 0` 時使用 `buildSlideCueEvents` + `buildTimingsFromSlideCueEvents` 衍生 timings（不使用舊的 `normalizeTimings` state）
+
+### 22.2 換頁標記縮圖預覽（D13）
+
+- [x] **D13-1 — `SrtCueEditor` 新增 `pdfBlob?: Blob | null` prop**：chip bar 與 SRT 列表之間插入縮圖預覽區
+- [x] **D13-2 — 延遲渲染縮圖**：使用者第一次點擊 chip 時才觸發 `pdfToJpegBase64(pdfBlob, 0.3)` 渲染（低畫質、節省記憶體）；渲染中顯示 `animate-pulse` 骨架；縮圖快取於 `thumbnails` state，後續切換 chip 不重跑
+- [x] **D13-3 — `app/page.tsx` 傳入 `pdfBlob`**：兩個 `<SrtCueEditor>` 均補入 `pdfBlob={pdfFile}`
+
+### 22.3 cue 排序輸出修正（D14）
+
+- [x] **D14-1 — `buildOrderedImagesFromTimings()`**（`lib/generatePptx.ts`，已 export）：依 timings `[i].slideIndex - 1` 從 `allImages` 取出對應頁，確保 PPTX 與 MP4 的幀順序跟隨使用者 cue 標記，而非 PDF 頁序
+- [x] **D14-2 — `generatePptx()` 改用 cue 排序**：`pdfToJpegBase64` 取得 `allImages` 後立即呼叫 `buildOrderedImagesFromTimings(allImages, timings)`，PPTX 頁數 = timings 長度 = cue 數
+- [x] **D14-3 — `VideoExportBlock.tsx` 改用 cue 排序**：`handleGenerate()` 中引入 `buildOrderedImagesFromTimings`，確保傳至 `/api/export-video` 的 `images.length === timings.length`，修復 `images length (N) must match timings length (M)` 400 錯誤
+- [x] **D14-4 — PPTX 幀數與 SRT slide 標籤數一致（關鍵 bug fix）**：`buildPodcastPptxFromConfirmedSrt()` / `buildMusicPptxFromConfirmedSrt()` 當 `slideCues.length > 0` 時一律從 cues 重新計算 timings，不使用 `podcastTimings`/`musicTimings` state（後者為 `normalizeTimings` 輸出，長度 = PDF 頁數）；修正後 PPTX / MP4 幀數恆等於 cue 數
+
+### 22.4 Bug 修正
+
+- [x] **`Array.isArray()` 防呆**（`app/page.tsx`）：`buildPodcastPptxFromConfirmedSrt` / `buildMusicPptxFromConfirmedSrt` / `handleRepackPodcastPptx` / `handleRepackMusicPptx` 對從 IDB 載入的 timings 加 `Array.isArray()` 檢查，修復舊紀錄載入後呼叫 `.map()` 出現 `TypeError: timings.map is not a function`
+- [x] **D4-3 — diagnostics 加入 `srtConfirmed`**：兩條對齊 diagnostics 區塊新增「字幕確認：✓ 已確認 / 自動」欄位，方便確認目前是否使用手動確認 SRT
+
+### 22.5 單元測試（D12-1）
+
+- [x] **新增 `__tests__/timing.test.ts`**（25 個測試）：覆蓋 `buildSlideCueEvents` / `buildTimingsFromSlideCueEvents` / `buildSlideCuesFromVisualCueMatches` / `buildSlideCuesFromTransitionMatches` / `normalizeTimings`；與現有 `__tests__/srt.test.ts`（7 個）合計 32 個測試全數通過（`npm test` via vitest）

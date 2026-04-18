@@ -2,6 +2,15 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v20 補充亮點（2026-04-19，plan_D SRT 優先架構 + D13 縮圖預覽 + D14 cue 排序輸出）：
+1. **SRT 優先（SRT-first）架構**：對齊完成後新增兩階段人工確認流程——先在 `SrtReviewPanel` 確認 SRT 字幕內容，再透過 `SrtCueEditor` 指定每張投影片的換頁起始字幕列，最後才生成 PPTX；任何上游變動會自動廢止下游確認狀態。
+2. **`SrtSlideCue / SlideCueEvent` 兩階段 cue 資料模型**（`lib/types.ts`、`lib/timing.ts`）：`SrtSlideCue {srtId, slideIndex}` 儲存使用者標記；`buildSlideCueEvents()` 對應時間戳；`buildTimingsFromSlideCueEvents()` 衍生 `SlideTimings`（長度 = cue 數 = SRT `[slide-N]` 標籤數）。
+3. **D13 換頁標記縮圖預覽**（`components/SrtCueEditor.tsx`）：chip bar 與 SRT 列表之間插入 140×79px（16:9）縮圖區；使用者第一次點擊 chip 才觸發 `pdfToJpegBase64(pdfBlob, 0.3)` 延遲渲染（低畫質、省記憶體），之後快取不重跑；渲染中顯示 `animate-pulse` 骨架。
+4. **D14 cue 排序輸出**（`lib/generatePptx.ts`、`components/VideoExportBlock.tsx`）：新增 `buildOrderedImagesFromTimings(allImages, timings)` 函式，PPTX 與 MP4 的幀順序均依使用者 cue 的 `slideIndex` 重排，允許同一張投影片重複出現或以非 PDF 頁序呈現，且 `images.length === timings.length` 恆成立。
+5. **關鍵 bug fix — PPTX 幀數 = cue 數**（`app/page.tsx`）：`buildPodcastPptxFromConfirmedSrt` / `buildMusicPptxFromConfirmedSrt` 當 `slideCues.length > 0` 時一律從 cues 重新計算 timings，不使用儲存於 state 的 `normalizeTimings` 輸出（長度 = PDF 頁數）；修正後 PPTX 投影片張數恆等於 SRT `[slide-N]` 標籤數，MP4 影片幀數亦然。
+6. **`Array.isArray()` 防呆**（`app/page.tsx`）：舊版 IDB 紀錄的 timings 可能非陣列；所有呼叫 `.map()` 前加 `Array.isArray()` 檢查，修復 `TypeError: timings.map is not a function`。
+7. **單元測試 32 個全過**（`__tests__/timing.test.ts`）：新增 25 個測試覆蓋 `buildSlideCueEvents` / `buildTimingsFromSlideCueEvents` / `buildSlideCuesFromVisualCueMatches` / `buildSlideCuesFromTransitionMatches` / `normalizeTimings`；與 `srt.test.ts` 合計 32 個，`npm test` 全數通過。
+
 ### ✨ v19 補充亮點（2026-04-18，plan_B cueIndex 架構 + plan_A 歌詞編修統一化）：
 1. **`cueIndex` 段落定址契約**：歌曲對齊鏈全面改用 `cueIndex`（1..N 段落序號）取代 `slideIndex` 作為 Phase 2 定址 key；`slideIndex` 保留為資訊欄位，允許重複與回溯（多個段落可對應同一張投影片）。
 2. **`[No Slide]` 移除**：歌詞視覺標記規則改為每個段落必須輸出 `[Slide N]`；`LyricVisualTag` 型別簡化為純 `{ kind: 'slide'; slideIndex: number }`，移除 `no-slide` union 分支。提供 fallback 規則：第一段無法判斷時用 `[Slide 1]`，中途不確定時延續前一段。

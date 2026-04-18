@@ -25,6 +25,7 @@ export const STEP41_MODEL_OPTIONS = STEP71_MODEL_OPTIONS;
 export const MULTIMODAL_MODEL_OPTIONS = STEP41_MODEL_OPTIONS;
 
 export const TTS_MODEL_OPTIONS = [
+  { value: 'gemini-3.1-flash-tts-preview', label: 'gemini-3.1-flash-tts-preview' },
   { value: 'gemini-2.5-pro-preview-tts', label: 'gemini-2.5-pro-preview-tts' },
   { value: 'gemini-2.5-flash-preview-tts', label: 'gemini-2.5-flash-preview-tts（預設）' },
 ] as const;

@@ -4,12 +4,14 @@ import { useState, useEffect, useRef } from 'react';
 import { setUnauthorizedHandler, apiFetch } from '@/lib/apiFetch';
 import LoginPage from '@/components/LoginPage';
 import VideoExportBlock from '@/components/VideoExportBlock';
+import SrtReviewPanel from '@/components/SrtReviewPanel';
+import SrtCueEditor from '@/components/SrtCueEditor';
 import { generatePptx } from '@/lib/generatePptx';
-import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings, buildTransitionAdjustedTimings } from '@/lib/timing';
-import { adjustSrtTimes } from '@/lib/srt';
+import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuration, shiftTimings, buildTransitionAdjustedTimings, buildSlideCueEvents, buildTimingsFromSlideCueEvents } from '@/lib/timing';
+import { adjustSrtTimes, serializeSrtWithSlideTags } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, NarrationLengthPreset, StepState, SlideTimings, TtsGenerationMode, VisualCueTiming } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, NarrationLengthPreset, StepState, SlideTimings, SrtEntry, SrtSlideCue, TtsGenerationMode, VisualCueTiming } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -358,6 +360,12 @@ export default function Home() {
   const [podcastTimings, setPodcastTimings] = useState<SlideTimings | null>(null);
   const [musicTimings, setMusicTimings] = useState<SlideTimings | null>(null);
   const [musicVisualCueTimings, setMusicVisualCueTimings] = useState<VisualCueTiming[] | null>(null);
+  const [podcastSrtEntries, setPodcastSrtEntries] = useState<SrtEntry[]>([]);
+  const [musicSrtEntries, setMusicSrtEntries] = useState<SrtEntry[]>([]);
+  const [podcastSlideCues, setPodcastSlideCues] = useState<SrtSlideCue[]>([]);
+  const [musicSlideCues, setMusicSlideCues] = useState<SrtSlideCue[]>([]);
+  const [podcastSrtConfirmed, setPodcastSrtConfirmed] = useState(false);
+  const [musicSrtConfirmed, setMusicSrtConfirmed] = useState(false);
   const [podcastVideoBlob, setPodcastVideoBlob] = useState<Blob | null>(null);
   const [musicVideoBlob, setMusicVideoBlob] = useState<Blob | null>(null);
   const [scriptGeneratedAt, setScriptGeneratedAt] = useState<number | null>(null);
@@ -397,6 +405,13 @@ export default function Home() {
 
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
+
+  const podcastSrtForDownload = podcastSlideCues.length > 0 && podcastSrtEntries.length > 0
+    ? serializeSrtWithSlideTags(podcastSrtEntries, podcastSlideCues)
+    : podcastSrt;
+  const musicSrtForDownload = musicSlideCues.length > 0 && musicSrtEntries.length > 0
+    ? serializeSrtWithSlideTags(musicSrtEntries, musicSlideCues)
+    : musicSrt;
   const isDuo = narrationMode === 'duo';
   const textModelOptions = localLlmEnabled
     ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
@@ -522,12 +537,18 @@ export default function Home() {
     setPodcastTimings(null);
     setPodcastSrtOffset(0);
     setPodcastVideoBlob(null);
+    setPodcastSrtEntries([]);
+    setPodcastSlideCues([]);
+    setPodcastSrtConfirmed(false);
     if (recordId) {
       void updateRecord(recordId, {
         podcastPptxBlob: undefined,
         podcastSrt: undefined,
         podcastDiagnostics: undefined,
         podcastTimings: undefined,
+        podcastSrtEntries: undefined,
+        podcastSlideCues: undefined,
+        podcastSrtConfirmed: undefined,
       }, normalizedOwnerEmail);
     }
   }
@@ -541,12 +562,18 @@ export default function Home() {
     setMusicVisualCueTimings(null);
     setMusicSrtOffset(0);
     setMusicVideoBlob(null);
+    setMusicSrtEntries([]);
+    setMusicSlideCues([]);
+    setMusicSrtConfirmed(false);
     if (recordId) {
       void updateRecord(recordId, {
         musicPptxBlob: undefined,
         musicSrt: undefined,
         musicDiagnostics: undefined,
         musicTimings: undefined,
+        musicSrtEntries: undefined,
+        musicSlideCues: undefined,
+        musicSrtConfirmed: undefined,
       }, normalizedOwnerEmail);
     }
   }
@@ -860,7 +887,7 @@ export default function Home() {
   }
 
   async function handleRepackPodcastPptx() {
-    if (!podcastBlob || !pdfFile || !podcastTimings) return;
+    if (!podcastBlob || !pdfFile || !Array.isArray(podcastTimings)) return;
     setStep4State({ status: 'loading' });
     try {
       const appliedOffset = podcastSrtOffset;
@@ -888,7 +915,7 @@ export default function Home() {
   }
 
   async function handleRepackMusicPptx() {
-    if (!musicBlob || !pdfFile || !musicTimings) return;
+    if (!musicBlob || !pdfFile || !Array.isArray(musicTimings)) return;
     setStep7State({ status: 'loading' });
     try {
       const appliedOffset = musicSrtOffset;
@@ -915,9 +942,11 @@ export default function Home() {
     }
   }
 
-  async function handleGeneratePodcastPptx() {
+  async function runAlignPodcast() {
     if (!podcastBlob || !script || !pdfFile) return;
     setPodcastVideoBlob(null);
+    setPodcastSrtConfirmed(false);
+    setPodcastPptxBlob(null);
     setStep4State({ status: 'loading' });
     try {
       const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
@@ -936,27 +965,48 @@ export default function Home() {
       let timings;
       let srt = '';
       let diagnostics: AlignPodcastDiagnostics | null = null;
+      let newSrtEntries: SrtEntry[] = [];
+      let newSlideCues: SrtSlideCue[] = [];
       if (res.ok) {
         const data = await res.json();
         diagnostics = data.diagnostics ?? null;
         timings = normalizeTimings(data.timings, slideCount, duration);
         srt = data.srt ?? '';
+        newSrtEntries = Array.isArray(data.srtEntries) ? data.srtEntries : [];
+        newSlideCues = Array.isArray(data.slideCues) ? data.slideCues : [];
       } else {
         console.warn('API align-podcast failed, falling back to heuristic calculation.', await res.text());
         timings = await calcPodcastTimings(script, slideCount, podcastBlob);
+        // Heuristic path: no SRT entries to review — confirm immediately and build PPTX
+        setPodcastTimings(timings);
+        setPodcastSrtConfirmed(true);
+        if (recordId) {
+          await updateRecord(recordId, {
+            podcastTimings: timings,
+            podcastSrtConfirmed: true,
+            multimodalModel, textModel, step41Model: multimodalModel, step42Model: textModel, contentLanguage,
+          }, normalizedOwnerEmail);
+        }
+        setStep4State({ status: 'done' });
+        await buildPodcastPptxFromConfirmedSrt(timings);
+        return;
       }
 
-      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
-      const pptx = await generatePptx(pdfFile, adjustedTimings, podcastBlob);
-      setPodcastPptxBlob(pptx); setPodcastSrt(srt); setStep4State({ status: 'done' });
+      setPodcastSrtEntries(newSrtEntries);
+      setPodcastSlideCues(newSlideCues);
+      setPodcastSrt(srt);
       setPodcastDiagnostics(diagnostics);
       setPodcastTimings(timings);
+      setStep4State({ status: 'done' });
+
       if (recordId) {
         await updateRecord(recordId, {
-          podcastPptxBlob: pptx,
           podcastSrt: srt,
           podcastDiagnostics: diagnostics ?? undefined,
           podcastTimings: timings,
+          podcastSrtEntries: newSrtEntries,
+          podcastSlideCues: newSlideCues,
+          podcastSrtConfirmed: false,
           multimodalModel,
           textModel,
           step41Model: multimodalModel,
@@ -964,11 +1014,64 @@ export default function Home() {
           contentLanguage,
         }, normalizedOwnerEmail);
       }
+      setToast('SRT 對齊完成，請確認字幕時間後繼續。');
+    } catch (e) {
+      setStep4State({ status: 'error', error: String(e) }); setToast('Podcast 對齊失敗：' + String(e));
+    }
+  }
+
+  async function handleGeneratePodcastPptx() {
+    if (!podcastBlob || !script || !pdfFile) return;
+    if (!podcastSrtConfirmed) {
+      await runAlignPodcast();
+      return;
+    }
+    await buildPodcastPptxFromConfirmedSrt();
+  }
+
+  async function buildPodcastPptxFromConfirmedSrt(freshTimings?: SlideTimings) {
+    if (!podcastBlob || !script || !pdfFile) return;
+    setPodcastVideoBlob(null);
+    setStep4State({ status: 'loading' });
+    try {
+      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
+      const duration = await getAudioDuration(podcastBlob);
+      // Derive timings from cues when available — this gives the correct frame count
+      // matching the SRT slide tags. Only fall back to freshTimings / stored timings
+      // (which are normalizeTimings output with length=slideCount) when there are no cues.
+      let timings: SlideTimings;
+      if (podcastSlideCues.length > 0 && podcastSrtEntries.length > 0) {
+        const events = buildSlideCueEvents(podcastSlideCues, podcastSrtEntries);
+        timings = events.length > 0
+          ? buildTimingsFromSlideCueEvents(events, duration)
+          : normalizeTimings([], slideCount, duration);
+      } else {
+        const raw = freshTimings ?? podcastTimings ?? null;
+        timings = Array.isArray(raw) ? raw : normalizeTimings([], slideCount, duration);
+      }
+      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, podcastBlob);
+      setPodcastPptxBlob(pptx);
+      setStep4State({ status: 'done' });
+      if (recordId) {
+        await updateRecord(recordId, {
+          podcastPptxBlob: pptx,
+          podcastSrtConfirmed: true,
+        }, normalizedOwnerEmail);
+      }
       setToast('Podcast 簡報已生成！'); loadHistory();
       setTimeout(() => step5Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
       setStep4State({ status: 'error', error: String(e) }); setToast('Podcast 簡報生成失敗：' + String(e));
     }
+  }
+
+  async function handleConfirmPodcastSrt() {
+    setPodcastSrtConfirmed(true);
+    if (recordId) {
+      await updateRecord(recordId, { podcastSrtConfirmed: true }, normalizedOwnerEmail);
+    }
+    await buildPodcastPptxFromConfirmedSrt();
   }
 
   async function handleLyricsContentSourceChange(nextSource: 'script' | 'slides') {
@@ -1065,9 +1168,11 @@ export default function Home() {
     }
   }
 
-  async function handleGenerateMusicPptx() {
+  async function runAlignMusic() {
     if (!musicBlob || !lyrics || !pdfFile) return;
     setMusicVideoBlob(null);
+    setMusicSrtConfirmed(false);
+    setMusicPptxBlob(null);
     setStep7State({ status: 'loading' });
     try {
       const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
@@ -1089,6 +1194,8 @@ export default function Home() {
       let srt = '';
       let diagnostics: AlignMusicDiagnostics | null = null;
       let visualCueTimings: VisualCueTiming[] | null = null;
+      let newSrtEntries: SrtEntry[] = [];
+      let newSlideCues: SrtSlideCue[] = [];
       if (res.ok) {
         const data = await res.json();
         diagnostics = data.diagnostics ?? null;
@@ -1099,23 +1206,42 @@ export default function Home() {
         visualCueTimings = Array.isArray(data.visualCueTimings) && data.visualCueTimings.length > 0
           ? data.visualCueTimings
           : null;
+        newSrtEntries = Array.isArray(data.srtEntries) ? data.srtEntries : [];
+        newSlideCues = Array.isArray(data.slideCues) ? data.slideCues : [];
       } else {
         console.warn('API align-music failed, falling back to heuristic calculation.', await res.text());
         timings = await calcMusicTimings(slideCount, musicBlob, lyrics);
+        // Heuristic path: no SRT entries to review — confirm immediately and build PPTX
+        setMusicTimings(timings);
+        setMusicSrtConfirmed(true);
+        if (recordId) {
+          await updateRecord(recordId, {
+            musicTimings: timings,
+            musicSrtConfirmed: true,
+            multimodalModel, textModel, step71Model: multimodalModel, step72Model: textModel, contentLanguage,
+          }, normalizedOwnerEmail);
+        }
+        setStep7State({ status: 'done' });
+        await buildMusicPptxFromConfirmedSrt(timings);
+        return;
       }
 
-      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
-      const pptx = await generatePptx(pdfFile, adjustedTimings, musicBlob);
-      setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
+      setMusicSrtEntries(newSrtEntries);
+      setMusicSlideCues(newSlideCues);
+      setMusicSrt(srt);
       setMusicDiagnostics(diagnostics);
       setMusicTimings(timings);
       setMusicVisualCueTimings(visualCueTimings);
+      setStep7State({ status: 'done' });
+
       if (recordId) {
         await updateRecord(recordId, {
-          musicPptxBlob: pptx,
           musicSrt: srt,
           musicDiagnostics: diagnostics ?? undefined,
           musicTimings: timings,
+          musicSrtEntries: newSrtEntries,
+          musicSlideCues: newSlideCues,
+          musicSrtConfirmed: false,
           multimodalModel,
           textModel,
           step71Model: multimodalModel,
@@ -1123,9 +1249,102 @@ export default function Home() {
           contentLanguage,
         }, normalizedOwnerEmail);
       }
+      setToast('SRT 對齊完成，請確認字幕時間後繼續。');
+    } catch (e) {
+      setStep7State({ status: 'error', error: String(e) }); setToast('音樂對齊失敗：' + String(e));
+    }
+  }
+
+  async function handleGenerateMusicPptx() {
+    if (!musicBlob || !lyrics || !pdfFile) return;
+    if (!musicSrtConfirmed) {
+      await runAlignMusic();
+      return;
+    }
+    await buildMusicPptxFromConfirmedSrt();
+  }
+
+  async function buildMusicPptxFromConfirmedSrt(freshTimings?: SlideTimings) {
+    if (!musicBlob || !pdfFile) return;
+    setMusicVideoBlob(null);
+    setStep7State({ status: 'loading' });
+    try {
+      const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
+      const duration = await getAudioDuration(musicBlob);
+      // Derive timings from cues when available — frame count must match SRT slide tags.
+      let timings: SlideTimings;
+      if (musicSlideCues.length > 0 && musicSrtEntries.length > 0) {
+        const events = buildSlideCueEvents(musicSlideCues, musicSrtEntries);
+        timings = events.length > 0
+          ? buildTimingsFromSlideCueEvents(events, duration)
+          : normalizeTimings([], slideCount, duration);
+      } else {
+        const raw = freshTimings ?? musicTimings ?? null;
+        timings = Array.isArray(raw) ? raw : normalizeTimings([], slideCount, duration);
+      }
+      const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
+      const pptx = await generatePptx(pdfFile, adjustedTimings, musicBlob);
+      setMusicPptxBlob(pptx);
+      setStep7State({ status: 'done' });
+      if (recordId) {
+        await updateRecord(recordId, {
+          musicPptxBlob: pptx,
+          musicSrtConfirmed: true,
+        }, normalizedOwnerEmail);
+      }
       setToast('音樂簡報已生成！'); loadHistory();
     } catch (e) {
       setStep7State({ status: 'error', error: String(e) }); setToast('音樂簡報生成失敗：' + String(e));
+    }
+  }
+
+  async function handleConfirmMusicSrt() {
+    setMusicSrtConfirmed(true);
+    if (recordId) {
+      await updateRecord(recordId, { musicSrtConfirmed: true }, normalizedOwnerEmail);
+    }
+    await buildMusicPptxFromConfirmedSrt();
+  }
+
+  async function handlePodcastCuesChange(nextCues: SrtSlideCue[]) {
+    setPodcastSlideCues(nextCues);
+    setPodcastPptxBlob(null);
+    setPodcastVideoBlob(null);
+    const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
+    const duration = podcastBlob ? await getAudioDuration(podcastBlob) : 0;
+    const events = buildSlideCueEvents(nextCues, podcastSrtEntries);
+    const nextTimings = events.length > 0
+      ? buildTimingsFromSlideCueEvents(events, duration)
+      : normalizeTimings([], slideCount, duration);
+    setPodcastTimings(nextTimings);
+    if (recordId) {
+      void updateRecord(recordId, {
+        podcastSlideCues: nextCues,
+        podcastTimings: nextTimings,
+        podcastPptxBlob: undefined,
+        podcastVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
+  async function handleMusicCuesChange(nextCues: SrtSlideCue[]) {
+    setMusicSlideCues(nextCues);
+    setMusicPptxBlob(null);
+    setMusicVideoBlob(null);
+    const slideCount = (slides.match(/投影片\s*\d+/g) ?? []).length || 3;
+    const duration = musicBlob ? await getAudioDuration(musicBlob) : 0;
+    const events = buildSlideCueEvents(nextCues, musicSrtEntries);
+    const nextTimings = events.length > 0
+      ? buildTimingsFromSlideCueEvents(events, duration)
+      : normalizeTimings([], slideCount, duration);
+    setMusicTimings(nextTimings);
+    if (recordId) {
+      void updateRecord(recordId, {
+        musicSlideCues: nextCues,
+        musicTimings: nextTimings,
+        musicPptxBlob: undefined,
+        musicVideoBlob: undefined,
+      }, normalizedOwnerEmail);
     }
   }
 
@@ -1167,9 +1386,15 @@ export default function Home() {
     if (rec.podcastSrt) setPodcastSrt(rec.podcastSrt); else setPodcastSrt('');
     if (rec.podcastDiagnostics) setPodcastDiagnostics(rec.podcastDiagnostics); else setPodcastDiagnostics(null);
     if (rec.podcastTimings) setPodcastTimings(rec.podcastTimings); else setPodcastTimings(null);
+    setPodcastSrtEntries(rec.podcastSrtEntries ?? []);
+    setPodcastSlideCues(rec.podcastSlideCues ?? []);
+    setPodcastSrtConfirmed(rec.podcastSrtConfirmed ?? false);
     if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
     if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
     if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
+    setMusicSrtEntries(rec.musicSrtEntries ?? []);
+    setMusicSlideCues(rec.musicSlideCues ?? []);
+    setMusicSrtConfirmed(rec.musicSrtConfirmed ?? false);
     setMusicVisualCueTimings(null);
     setLyricsContentSource(rec.lyricsContentSource ?? 'script');
     setScriptGeneratedAt(rec.scriptGeneratedAt ?? null);
@@ -1252,6 +1477,9 @@ export default function Home() {
     setMusicInputMode('api');
     setMusicSource('api');
     setPodcastSrt(''); setMusicSrt('');
+    setPodcastSrtEntries([]); setMusicSrtEntries([]);
+    setPodcastSlideCues([]); setMusicSlideCues([]);
+    setPodcastSrtConfirmed(false); setMusicSrtConfirmed(false);
     setPodcastDiagnostics(null);
     setMusicDiagnostics(null);
     setPodcastSrtOffset(0);
@@ -1808,36 +2036,68 @@ export default function Home() {
 
         {/* ── Step 4 ── */}
         <div ref={step4Ref}>
-          <StepCard step={4} title={isDuo ? '生成 Podcast 簡報 (AI 精準對齊)' : narrationMode === 'solo_explainer' ? '生成講解簡報（AI 精準對齊）' : '生成敘事簡報（AI 精準對齊）'} state={step4State} disabled={!podcastBlob || !script || isEditingScript} dark={dark}>
+          <StepCard step={4} title={isDuo ? '生成 Podcast 字幕與換頁標記' : narrationMode === 'solo_explainer' ? '生成講解字幕與換頁標記' : '生成敘事字幕與換頁標記'} state={step4State} disabled={!podcastBlob || !script || isEditingScript} dark={dark}>
             {step4State.status === 'loading'
-              ? <LoadingBar message="AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
+              ? <LoadingBar message={podcastSrtEntries.length === 0 ? 'AI 正在聆聽 Podcast 並標記轉場時間（可能需要 20-40 秒）...' : '正在封裝簡報...'} dark={dark} />
               : (
                 <div className="space-y-3">
-                  <ActionBtn onClick={handleGeneratePodcastPptx}>{step4State.status === 'done' ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}</ActionBtn>
+                  <ActionBtn onClick={handleGeneratePodcastPptx}>
+                    {podcastSrtEntries.length > 0 ? '重新執行 SRT 對齊' : '生成字幕與換頁標記'}
+                  </ActionBtn>
                   <p className={`text-[11px] leading-relaxed ${t.faint}`}>
                     對齊時會同時使用 Podcast 音訊與 Step 2 文稿，因此外部上傳音訊前也需要先保留對應文稿。
                   </p>
                 </div>
               )}
-            {podcastPptxBlob && step4State.status === 'done' && (
-              <div className="mt-3 space-y-2">
-                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
-                {podcastDiagnostics && (
-                  <p className={`text-[11px] ${t.faint}`}>
-                    ASR 模式：{podcastDiagnostics.asrMode} ／ 字幕來源：{podcastDiagnostics.srtSource} ／ 對齊來源：{podcastDiagnostics.timingSource}
-                  </p>
-                )}
-                <DownloadChip label="podcast.pptx" onClick={() => downloadBlob(podcastPptxBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'pptx'))} dark={dark} />
-                {podcastSrt && (
-                  <div className="inline-flex items-center">
-                    <DownloadChip label="podcast.srt" onClick={() => downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt'))} dark={dark} />
-                    <OffsetSelect offset={podcastSrtOffset} onChange={setPodcastSrtOffset} dark={dark} />
-                    {podcastTimings && podcastSrtOffset !== 0 && (
-                      <button onClick={handleRepackPodcastPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
-                        套用偏移至轉場
-                      </button>
-                    )}
-                  </div>
+            {podcastSrtEntries.length > 0 && (
+              <div className="mt-3 space-y-3">
+                <SrtReviewPanel
+                  audioBlob={podcastBlob}
+                  srtEntries={podcastSrtEntries}
+                  srtConfirmed={podcastSrtConfirmed}
+                  onConfirm={handleConfirmPodcastSrt}
+                  onRealign={runAlignPodcast}
+                  realigning={step4State.status === 'loading'}
+                  dark={dark}
+                />
+                {podcastSrtConfirmed && (
+                  <>
+                    <SrtCueEditor
+                      srtEntries={podcastSrtEntries}
+                      slideCues={podcastSlideCues}
+                      slideCount={(slides.match(/投影片\s*\d+/g) ?? []).length || 3}
+                      onChange={handlePodcastCuesChange}
+                      pdfBlob={pdfFile}
+                      dark={dark}
+                    />
+                    <div className="space-y-2">
+                      <ActionBtn onClick={buildPodcastPptxFromConfirmedSrt}>
+                        {podcastPptxBlob ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}
+                      </ActionBtn>
+                      {podcastPptxBlob && step4State.status === 'done' && (
+                        <div className="space-y-2">
+                          <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 語音畫面完美同步！</p>
+                          {podcastDiagnostics && (
+                            <p className={`text-[11px] ${t.faint}`}>
+                              ASR 模式：{podcastDiagnostics.asrMode} ／ 字幕來源：{podcastDiagnostics.srtSource} ／ 對齊來源：{podcastDiagnostics.timingSource} ／ 字幕確認：{podcastSrtConfirmed ? '✓ 已確認' : '自動'}
+                            </p>
+                          )}
+                          <DownloadChip label="podcast.pptx" onClick={() => downloadBlob(podcastPptxBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'pptx'))} dark={dark} />
+                          {podcastSrt && (
+                            <div className="inline-flex items-center">
+                              <DownloadChip label="podcast.srt" onClick={() => downloadText(adjustSrtTimes(podcastSrtForDownload, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt'))} dark={dark} />
+                              <OffsetSelect offset={podcastSrtOffset} onChange={setPodcastSrtOffset} dark={dark} />
+                              {podcastTimings && podcastSrtOffset !== 0 && (
+                                <button onClick={handleRepackPodcastPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
+                                  套用偏移至轉場
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -2006,29 +2266,61 @@ export default function Home() {
 
         {/* ── Step 7 ── */}
         <div ref={step7Ref}>
-          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob || isEditingScript || isEditingLyrics} dark={dark}>
+          <StepCard step={7} title="生成歌曲字幕與換頁標記" state={step7State} disabled={!musicBlob || isEditingScript || isEditingLyrics} dark={dark}>
             {step7State.status === 'loading'
-              ? <LoadingBar message="AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
-              : <ActionBtn onClick={handleGenerateMusicPptx}>{step7State.status === 'done' ? '重新生成歌曲簡報' : '生成歌曲簡報'}</ActionBtn>}
-            {musicPptxBlob && step7State.status === 'done' && (
-              <div className="mt-3 space-y-2">
-                <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 歌曲段落畫面同步！</p>
-                {musicDiagnostics && (
-                  <p className={`text-[11px] ${t.faint}`}>
-                    ASR 模式：{musicDiagnostics.asrMode} ／ 字幕來源：{musicDiagnostics.srtSource} ／ 對齊來源：{musicDiagnostics.timingSource}
-                  </p>
-                )}
-                <DownloadChip label="music.pptx" onClick={() => downloadBlob(musicPptxBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'pptx'))} dark={dark} />
-                {musicSrt && (
-                  <div className="inline-flex items-center">
-                    <DownloadChip label="music.srt" onClick={() => downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt'))} dark={dark} />
-                    <OffsetSelect offset={musicSrtOffset} onChange={setMusicSrtOffset} dark={dark} />
-                    {musicTimings && musicSrtOffset !== 0 && (
-                      <button onClick={handleRepackMusicPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
-                        套用偏移至轉場
-                      </button>
-                    )}
-                  </div>
+              ? <LoadingBar message={musicSrtEntries.length === 0 ? 'AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）...' : '正在封裝簡報...'} dark={dark} />
+              : <ActionBtn onClick={handleGenerateMusicPptx}>
+                  {musicSrtEntries.length > 0 ? '重新執行 SRT 對齊' : '生成字幕與換頁標記'}
+                </ActionBtn>}
+            {musicSrtEntries.length > 0 && (
+              <div className="mt-3 space-y-3">
+                <SrtReviewPanel
+                  audioBlob={musicBlob}
+                  srtEntries={musicSrtEntries}
+                  srtConfirmed={musicSrtConfirmed}
+                  onConfirm={handleConfirmMusicSrt}
+                  onRealign={runAlignMusic}
+                  realigning={step7State.status === 'loading'}
+                  dark={dark}
+                />
+                {musicSrtConfirmed && (
+                  <>
+                    <SrtCueEditor
+                      srtEntries={musicSrtEntries}
+                      slideCues={musicSlideCues}
+                      slideCount={(slides.match(/投影片\s*\d+/g) ?? []).length || 3}
+                      onChange={handleMusicCuesChange}
+                      pdfBlob={pdfFile}
+                      dark={dark}
+                    />
+                    <div className="space-y-2">
+                      <ActionBtn onClick={buildMusicPptxFromConfirmedSrt}>
+                        {musicPptxBlob ? '重新生成歌曲簡報' : '生成歌曲簡報'}
+                      </ActionBtn>
+                      {musicPptxBlob && step7State.status === 'done' && (
+                        <div className="space-y-2">
+                          <p className={`text-[11px] font-medium ${dark ? 'text-emerald-400' : 'text-emerald-700'}`}>✓ 歌曲段落畫面同步！</p>
+                          {musicDiagnostics && (
+                            <p className={`text-[11px] ${t.faint}`}>
+                              ASR 模式：{musicDiagnostics.asrMode} ／ 字幕來源：{musicDiagnostics.srtSource} ／ 對齊來源：{musicDiagnostics.timingSource} ／ 字幕確認：{musicSrtConfirmed ? '✓ 已確認' : '自動'}
+                            </p>
+                          )}
+                          <DownloadChip label="music.pptx" onClick={() => downloadBlob(musicPptxBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'pptx'))} dark={dark} />
+                          {musicSrt && (
+                            <div className="inline-flex items-center">
+                              <DownloadChip label="music.srt" onClick={() => downloadText(adjustSrtTimes(musicSrtForDownload, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt'))} dark={dark} />
+                              <OffsetSelect offset={musicSrtOffset} onChange={setMusicSrtOffset} dark={dark} />
+                              {musicTimings && musicSrtOffset !== 0 && (
+                                <button onClick={handleRepackMusicPptx} className={`ml-2 text-[11px] font-semibold px-2 py-1.5 rounded border transition-all ${dark ? 'text-amber-400 border-amber-500 hover:bg-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-300 hover:bg-amber-100'}`}>
+                                  套用偏移至轉場
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </>
                 )}
               </div>
             )}
@@ -2069,8 +2361,8 @@ export default function Home() {
                   { label: 'slides.txt', avail: !!slides, fn: () => slides && downloadText(slides, 'slides.txt') },
                   { label: 'script.txt', avail: !!script, fn: () => script && downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt')) },
                   { label: 'lyrics.txt', avail: !!lyrics, fn: () => lyrics && downloadText(lyrics, buildTaggedName('lyrics', getMusicTag(lyricsGeneratedAt), 'txt')) },
-                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(adjustSrtTimes(podcastSrt, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt')) },
-                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(adjustSrtTimes(musicSrt, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt')) },
+                  { label: 'podcast.srt', avail: !!podcastSrt, fn: () => podcastSrt && downloadText(adjustSrtTimes(podcastSrtForDownload, podcastSrtOffset), buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'srt')) },
+                  { label: 'music.srt', avail: !!musicSrt, fn: () => musicSrt && downloadText(adjustSrtTimes(musicSrtForDownload, musicSrtOffset), buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'srt')) },
                 ].map(({ label, avail, fn }) => (
                   <button key={label} onClick={fn} disabled={!avail}
                     className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(avail, false)}`}>
@@ -2173,8 +2465,14 @@ export default function Home() {
                       {rec.musicBlob && <button onClick={() => downloadBlob(rec.musicBlob!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'mp3'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music</button>}
                       {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
                       {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
-                      {rec.podcastSrt && <button onClick={() => downloadText(rec.podcastSrt!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'srt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
-                      {rec.musicSrt && <button onClick={() => downloadText(rec.musicSrt!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'srt'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
+                      {rec.podcastSrt && <button onClick={() => {
+                          const srt = rec.podcastSlideCues?.length && rec.podcastSrtEntries?.length ? serializeSrtWithSlideTags(rec.podcastSrtEntries, rec.podcastSlideCues) : rec.podcastSrt!;
+                          downloadText(srt, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'srt'));
+                        }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
+                      {rec.musicSrt && <button onClick={() => {
+                          const srt = rec.musicSlideCues?.length && rec.musicSrtEntries?.length ? serializeSrtWithSlideTags(rec.musicSrtEntries, rec.musicSlideCues) : rec.musicSrt!;
+                          downloadText(srt, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'srt'));
+                        }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
                       <button onClick={() => { void deleteRecord(rec.id, normalizedOwnerEmail); void loadHistory(); }}
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ml-auto ${dark ? 'text-red-400 bg-red-900/30 hover:bg-red-900/50' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>刪除</button>
                     </div>

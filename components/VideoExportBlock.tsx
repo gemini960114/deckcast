@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { apiFetch } from '@/lib/apiFetch';
 import { pdfToJpegBase64 } from '@/lib/pdfToImages';
+import { buildOrderedImagesFromTimings } from '@/lib/generatePptx';
 import type { SlideTimings } from '@/lib/types';
 
 interface VideoExportBlockProps {
@@ -72,7 +73,9 @@ export default function VideoExportBlock({
     setRetryCount(0);
 
     try {
-      const images = await pdfToJpegBase64(pdfBlob);
+      const allImages = await pdfToJpegBase64(pdfBlob);
+      // D14-3: reorder by cue timeline so images.length === timings.length
+      const images = buildOrderedImagesFromTimings(allImages, timings);
       setStatus('uploading');
       const audioBase64 = await blobToBase64(audioBlob);
 

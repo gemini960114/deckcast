@@ -2,6 +2,15 @@ import type { SlideTimings } from './types';
 import { pdfToJpegBase64 } from './pdfToImages';
 import { LAST_SLIDE_TAIL_SEC } from './constants';
 
+// D14-1: reorder all PDF page images according to cue timeline
+export function buildOrderedImagesFromTimings(
+  allImages: string[],
+  timings: SlideTimings,
+): string[] {
+  if (timings.length === 0) return allImages;
+  return timings.map(t => allImages[t.slideIndex - 1] ?? allImages[0]);
+}
+
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -56,7 +65,10 @@ export async function generatePptx(
   audioBlob?: Blob
 ): Promise<Blob> {
   // Render all PDF pages to JPEG base64 (CDN PDF.js, scale=2, quality=0.85)
-  const images = await pdfToJpegBase64(pdfBlob);
+  const allImages = await pdfToJpegBase64(pdfBlob);
+
+  // D14-2: reorder by cue timeline (supports repeat slides / non-PDF order)
+  const images = buildOrderedImagesFromTimings(allImages, timings);
 
   const PptxGenJS = (await import('pptxgenjs')).default;
   const JSZip = (await import('jszip')).default;

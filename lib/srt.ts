@@ -1,4 +1,4 @@
-import type { SrtEntry } from './types';
+import type { SrtEntry, SrtSlideCue } from './types';
 
 export interface SrtValidationResult {
   valid: boolean;
@@ -193,6 +193,66 @@ function msToSrtTime(ms: number): string {
   const ss = Math.floor(ms / 1000);
   ms %= 1000;
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')},${String(ms).padStart(3, '0')}`;
+}
+
+export function serializeSrtWithSlideTags(entries: SrtEntry[], slideCues: SrtSlideCue[]): string {
+  const cueMap = new Map<number, number>();
+  for (const cue of slideCues) {
+    cueMap.set(cue.srtId, cue.slideIndex);
+  }
+
+  return entries
+    .map(entry => {
+      const slideIndex = cueMap.get(entry.id);
+      const indexLine = slideIndex !== undefined
+        ? `${entry.id} [slide-${slideIndex}]`
+        : `${entry.id}`;
+      return `${indexLine}\n${toSrtTimestamp(entry.start)} --> ${toSrtTimestamp(entry.end)}\n${entry.text}`;
+    })
+    .join('\n\n')
+    .trim();
+}
+
+export function parseSrtWithSlideTags(srtText: string): { entries: SrtEntry[]; slideCues: SrtSlideCue[] } {
+  const blocks = srtText.trim().split(/\n\n+/);
+  const entries: SrtEntry[] = [];
+  const slideCues: SrtSlideCue[] = [];
+
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    if (lines.length < 3) continue;
+
+    const indexLine = lines[0].trim();
+    const timingLine = lines[1].trim();
+    const textLines = lines.slice(2).join('\n').trim();
+
+    const slideTagMatch = indexLine.match(/^(\d+)\s+\[slide-(\d+)\]/i);
+    const plainMatch = indexLine.match(/^(\d+)$/);
+
+    let id: number;
+    if (slideTagMatch) {
+      id = parseInt(slideTagMatch[1], 10);
+      slideCues.push({ srtId: id, slideIndex: parseInt(slideTagMatch[2], 10) });
+    } else if (plainMatch) {
+      id = parseInt(plainMatch[1], 10);
+    } else {
+      continue;
+    }
+
+    const timingMatch = timingLine.match(/^(\d{2}:\d{2}:\d{2},\d{3})\s+-->\s+(\d{2}:\d{2}:\d{2},\d{3})$/);
+    if (!timingMatch) continue;
+
+    try {
+      const start = srtTimeToMs(timingMatch[1]) / 1000;
+      const end = srtTimeToMs(timingMatch[2]) / 1000;
+      if (!textLines) continue;
+      entries.push({ id, start, end, text: textLines });
+    } catch {
+      continue;
+    }
+  }
+
+  return { entries, slideCues };
 }
 
 export function adjustSrtTimes(srtText: string, offsetSeconds: number): string {

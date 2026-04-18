@@ -22,6 +22,17 @@ export interface SrtEntry {
   text: string;
 }
 
+export interface SrtSlideCue {
+  srtId: number;
+  slideIndex: number;
+}
+
+export interface SlideCueEvent {
+  srtId: number;
+  slideIndex: number;
+  startSec: number;
+}
+
 export interface MusicTransitionMatch {
   slideIndex: number;
   startSrtId: number | null;
@@ -118,6 +129,12 @@ export interface GenerationRecord {
   musicDiagnostics?: AlignMusicDiagnostics;
   podcastTimings?: SlideTiming[];
   musicTimings?: SlideTiming[];
+  podcastSrtEntries?: SrtEntry[];
+  musicSrtEntries?: SrtEntry[];
+  podcastSlideCues?: SrtSlideCue[];
+  musicSlideCues?: SrtSlideCue[];
+  podcastSrtConfirmed?: boolean;
+  musicSrtConfirmed?: boolean;
   // Step 4.1 / 7.1 — optional video export
   podcastVideoBlob?: Blob;
   musicVideoBlob?: Blob;

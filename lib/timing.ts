@@ -1,4 +1,4 @@
-import type { LyricSection, LyricVisualTag, MusicTransitionMatch, SlideTimings, SrtEntry, VisualCueMatch, VisualCueTiming } from './types';
+import type { LyricSection, LyricVisualTag, MusicTransitionMatch, SlideCueEvent, SlideTimings, SrtEntry, SrtSlideCue, VisualCueMatch, VisualCueTiming } from './types';
 
 export function getAudioDuration(blob: Blob): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -511,6 +511,54 @@ export function buildTransitionAdjustedTimings(
       durationSec: adjustedDuration,
     };
   });
+}
+
+export function buildSlideCueEvents(slideCues: SrtSlideCue[], srtEntries: SrtEntry[]): SlideCueEvent[] {
+  const idToEntry = new Map(srtEntries.map(e => [e.id, e]));
+  const events: SlideCueEvent[] = [];
+
+  for (const cue of slideCues) {
+    const entry = idToEntry.get(cue.srtId);
+    if (!entry) continue;
+    events.push({ srtId: cue.srtId, slideIndex: cue.slideIndex, startSec: entry.start });
+  }
+
+  return events.sort((a, b) => a.startSec - b.startSec || a.srtId - b.srtId);
+}
+
+export function buildTimingsFromSlideCueEvents(
+  events: SlideCueEvent[],
+  totalDuration: number
+): SlideTimings {
+  if (events.length === 0) return [];
+
+  return events.map((event, i) => {
+    const startSec = i === 0 ? Math.max(0, event.startSec) : event.startSec;
+    const endSec = i + 1 < events.length ? events[i + 1].startSec : totalDuration;
+    const durationSec = Math.max(endSec - startSec, 0.5);
+    return {
+      slideIndex: event.slideIndex,
+      startSec,
+      endSec,
+      durationSec,
+    };
+  });
+}
+
+export function buildSlideCuesFromVisualCueMatches(
+  matches: import('./types').VisualCueMatch[]
+): SrtSlideCue[] {
+  return matches
+    .filter(m => m.slideIndex !== null && m.startSrtId !== null)
+    .map(m => ({ srtId: m.startSrtId as number, slideIndex: m.slideIndex as number }));
+}
+
+export function buildSlideCuesFromTransitionMatches(
+  matches: MusicTransitionMatch[]
+): SrtSlideCue[] {
+  return matches
+    .filter(m => m.startSrtId !== null)
+    .map(m => ({ srtId: m.startSrtId as number, slideIndex: m.slideIndex }));
 }
 
 // Applies offset to slide timings (only updates endSec and adjusts duration accordingly)
