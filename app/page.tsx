@@ -1063,6 +1063,9 @@ export default function Home() {
         const raw = freshTimings ?? podcastTimings ?? null;
         timings = Array.isArray(raw) ? raw : normalizeTimings([], slideCount, duration);
       }
+      // Sync state so VideoExportBlock receives the cue-derived timings (length = cue count,
+      // not PDF page count), ensuring PPTX and MP4 frame counts stay identical.
+      setPodcastTimings(timings);
       const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
       const pptx = await generatePptx(pdfFile, adjustedTimings, podcastBlob);
       setPodcastPptxBlob(pptx);
@@ -1296,6 +1299,9 @@ export default function Home() {
         const raw = freshTimings ?? musicTimings ?? null;
         timings = Array.isArray(raw) ? raw : normalizeTimings([], slideCount, duration);
       }
+      // Sync state so VideoExportBlock receives the cue-derived timings (length = cue count,
+      // not PDF page count), ensuring PPTX and MP4 frame counts stay identical.
+      setMusicTimings(timings);
       const adjustedTimings = buildTransitionAdjustedTimings(timings, TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC);
       const pptx = await generatePptx(pdfFile, adjustedTimings, musicBlob);
       setMusicPptxBlob(pptx);

@@ -533,6 +533,7 @@
 
 - [x] **`Array.isArray()` 防呆**（`app/page.tsx`）：`buildPodcastPptxFromConfirmedSrt` / `buildMusicPptxFromConfirmedSrt` / `handleRepackPodcastPptx` / `handleRepackMusicPptx` 對從 IDB 載入的 timings 加 `Array.isArray()` 檢查，修復舊紀錄載入後呼叫 `.map()` 出現 `TypeError: timings.map is not a function`
 - [x] **D4-3 — diagnostics 加入 `srtConfirmed`**：兩條對齊 diagnostics 區塊新增「字幕確認：✓ 已確認 / 自動」欄位，方便確認目前是否使用手動確認 SRT
+- [x] **PPTX 生成後同步更新 timings state（關鍵 bug fix）**（`app/page.tsx`）：`buildPodcastPptxFromConfirmedSrt()` / `buildMusicPptxFromConfirmedSrt()` 在從 cue events 計算出 timings 後，立即呼叫 `setPodcastTimings(timings)` / `setMusicTimings(timings)` 同步 state；修正前 `VideoExportBlock` 拿到的是舊版 `normalizeTimings` 輸出（長度 = PDF 頁數），導致使用者刻意捨棄最後一張投影片（如只標 11 個換頁點但 PDF 有 12 頁）時，MP4 仍匯入第 12 張圖，與 PPTX 幀數不一致；修正後 `timings.length` 與 `musicSlideCues.length` / `podcastSlideCues.length` 恆等，PPTX 與 MP4 幀數始終相同
 
 ### 22.5 單元測試（D12-1）
 

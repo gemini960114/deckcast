@@ -100,7 +100,7 @@
 - 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
 - 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
 - PPTX 與 MP4 共用同一套 `resolveEffectiveTransitionSec()` 計算轉場時長，確保兩者時間語意完全一致：timings 代表「新頁完全可見的時間點」，在 PPTX 與 MP4 均成立
-- **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = SRT `[slide-N]` cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同，修復舊版 `images length must match timings length` 錯誤）
+- **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = 使用者標記的換頁 cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同）；生成 PPTX 後會立即同步 `timings` state，確保使用者刻意捨棄部分投影片時（如 12 頁 PDF 只標 11 個換頁點），MP4 與 PPTX 均只輸出 11 頁，不會多出 PDF 多餘的末頁
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
 - 若已有 SRT，可在匯出前勾選「燒入字幕」，將字幕永久嵌入畫面；未勾選時仍可另外下載 `.srt`
 - 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg

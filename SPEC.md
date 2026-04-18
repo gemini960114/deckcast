@@ -1772,7 +1772,24 @@ xfade offset（直接公式，非累積）：
 
 > PPTX 與 MP4 共用 `resolveEffectiveTransitionSec()`，確保「新頁完全可見的時間點」在兩者之間語意完全一致。timings 代表原始對齊後的時間，PPTX 輸出時透過 `buildTransitionAdjustedTimings()` 扣除轉場時長，MP4 直接用 offset 公式推算，二者最終呈現效果相同。
 
-### 28.4 前端 VideoExportBlock 狀態機
+### 28.4 timings state 同步（PPTX ↔ MP4 幀數一致性）
+
+`buildPodcastPptxFromConfirmedSrt()` / `buildMusicPptxFromConfirmedSrt()` 在從 cue events 推算出 `timings` 後，**必須立即同步 `setPodcastTimings` / `setMusicTimings`**，否則 `VideoExportBlock` 收到的是舊版 `normalizeTimings` 輸出（長度 = PDF 頁數），導致 MP4 比 PPTX 多輸出捨棄的末頁。
+
+```
+buildSlideCueEvents(cues, srtEntries)     → events (11 筆，若使用者只標 11 個 cue)
+buildTimingsFromSlideCueEvents(events)    → timings (11 筆)
+setPodcastTimings(timings)               ← 必須同步，VideoExportBlock 才能拿到正確長度
+buildTransitionAdjustedTimings(timings)  → adjustedTimings → generatePptx()
+```
+
+若省略同步步驟：
+- `podcastTimings` state 仍為 12 筆（align API 回傳值）
+- `VideoExportBlock timings={podcastTimings}` → 12 筆
+- `buildOrderedImagesFromTimings(allImages, 12-timings)` → 12 張圖
+- PPTX 11 頁，MP4 12 頁 → 不一致
+
+### 28.5 前端 VideoExportBlock 狀態機
 
 ```
 idle
