@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { apiFetch } from '@/lib/apiFetch';
 import { pdfToJpegBase64 } from '@/lib/pdfToImages';
 import { buildOrderedImagesFromTimings } from '@/lib/generatePptx';
@@ -14,10 +14,12 @@ interface VideoExportBlockProps {
   filename: string;
   displayName?: string;
   cachedBlob: Blob | null;
-  onCached: (blob: Blob) => void;
+  cachedFilename?: string | null;
+  onCached: (blob: Blob, filename: string) => void;
   onClearCache: () => void;
   dark: boolean;
   videoExportEnabled: boolean;
+  srtText?: string | null;
 }
 
 type ExportStatus = 'idle' | 'rendering' | 'uploading' | 'waiting' | 'error';
@@ -43,6 +45,10 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function getExportFilename(filename: string, burnSubs: boolean) {
+  return burnSubs ? filename.replace(/\.mp4$/i, '.subbed.mp4') : filename;
+}
+
 export default function VideoExportBlock({
   title,
   pdfBlob,
@@ -51,15 +57,25 @@ export default function VideoExportBlock({
   filename,
   displayName,
   cachedBlob,
+  cachedFilename,
   onCached,
   onClearCache,
   dark,
   videoExportEnabled,
+  srtText,
 }: VideoExportBlockProps) {
   const [status, setStatus] = useState<ExportStatus>('idle');
   const [error, setError] = useState('');
   const [forceRegen, setForceRegen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
+  const [burnSubs, setBurnSubs] = useState(false);
+  const hasSrt = Boolean(srtText);
+
+  useEffect(() => {
+    if (!hasSrt) {
+      setBurnSubs(false);
+    }
+  }, [hasSrt]);
 
   if (!videoExportEnabled) return null;
 
@@ -78,6 +94,7 @@ export default function VideoExportBlock({
       const images = buildOrderedImagesFromTimings(allImages, timings);
       setStatus('uploading');
       const audioBase64 = await blobToBase64(audioBlob);
+      const exportFilename = getExportFilename(filename, burnSubs && hasSrt);
 
       let attempt = 0;
       while (true) {
@@ -89,6 +106,8 @@ export default function VideoExportBlock({
           audioMimeType: audioBlob.type || 'audio/wav',
           transition: 'fade',
           resolution: '1080p',
+          burnSubs: burnSubs && hasSrt,
+          srtText: burnSubs && hasSrt ? srtText : undefined,
         });
 
         // 503 = server busy → auto-retry with delay
@@ -106,8 +125,8 @@ export default function VideoExportBlock({
         }
 
         const blob = await res.blob();
-        triggerDownload(blob, filename);
-        onCached(blob);
+        triggerDownload(blob, exportFilename);
+        onCached(blob, exportFilename);
         setStatus('idle');
         setForceRegen(false);
         setRetryCount(0);
@@ -152,7 +171,7 @@ export default function VideoExportBlock({
   function renderButton() {
     if (showCached) {
       return (
-        <button className={chipCached} onClick={() => triggerDownload(cachedBlob!, filename)}>
+        <button className={chipCached} onClick={() => triggerDownload(cachedBlob!, cachedFilename ?? filename)}>
           ✓ 已生成・再次下載
         </button>
       );
@@ -202,6 +221,28 @@ export default function VideoExportBlock({
           </p>
         </div>
       </div>
+
+      {hasSrt && (
+        <div className="mb-3 space-y-1.5">
+          <label className={`flex items-center gap-2 cursor-pointer select-none w-fit ${status !== 'idle' ? 'opacity-40 pointer-events-none' : ''}`}>
+            <input
+              type="checkbox"
+              checked={burnSubs}
+              onChange={e => {
+                setBurnSubs(e.target.checked);
+                onClearCache();
+              }}
+              className="w-3.5 h-3.5 accent-blue-500"
+            />
+            <span className={`text-[11px] font-medium ${dark ? 'text-slate-300' : 'text-slate-600'}`}>
+              燒入字幕（字幕將永久嵌入畫面）
+            </span>
+          </label>
+          <p className={`text-[10px] ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+            未勾選時會輸出純畫面影片，字幕仍可另外下載 `.srt`。
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center gap-3 flex-wrap">
         {renderButton()}

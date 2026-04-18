@@ -470,6 +470,41 @@
 - [x] **`handleNewProject()` 重置**：`setLyricsContentSource('script')`
 - [x] **`handleNarrationModeChange()` 重置 `musicVisualCueTimings`**（plan_B state 一致性）
 
+## 23. 2026-04-19 燒入字幕功能（Burn Subtitles）
+
+### 23.1 後端 FFmpeg 字幕燒入（`lib/videoExport.ts`）
+- [x] **新增 `escapeSrtPath()`**：路徑反斜線轉正斜線 + 冒號跳脫（`\:`），確保 Windows 路徑相容 FFmpeg filter 語法
+- [x] **新增 `SUBTITLE_STYLE` 常數**：`Fontname=Noto Sans CJK TC,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0,Fontsize=22`（半透明黑底 + CJK 字型）
+- [x] **`GenerateVideoParams` 新增 `srtText?` / `burnSubs?`**：`burnSubs=true` 且 `srtText` 存在時觸發字幕燒入流程
+- [x] **`generateVideo()` 寫入暫存 SRT 檔**：`workDir/subtitles.srt`，工作目錄清理時一併刪除
+- [x] **`buildConcatArgs()` 支援 `srtPath`**：有 srtPath 時在 `-vf` 後方附加 `subtitles=` filter
+- [x] **`buildXfadeArgs()` 支援 `srtPath`**：有 srtPath 時以 `[vxf]` 中間節點橋接 subtitle filter，輸出為 `[vout]`；無 srtPath 時行為不變
+
+### 23.2 API Route（`app/api/export-video/route.ts`）
+- [x] **`ExportVideoRequest` 新增 `srtText?` / `burnSubs?`**：接收前端燒字幕請求
+- [x] **`params.srtText` 條件賦值**：`body.burnSubs ? (body.srtText ?? undefined) : undefined`；僅 `burnSubs=true` 時才傳入
+- [x] **`params.burnSubs` 雙重驗證**：`body.burnSubs === true && !!body.srtText`，防止欄位不一致
+
+### 23.3 前端元件（`components/VideoExportBlock.tsx`）
+- [x] **新增 `srtText?: string | null` prop**：有值時顯示「燒入字幕」checkbox，消失時自動取消勾選
+- [x] **新增 `cachedFilename?: string | null` prop**：快取影片的實際檔名（可能含 `.subbed`）
+- [x] **`onCached` 簽名改為 `(blob: Blob, filename: string) => void`**：將實際檔名一路回傳 parent
+- [x] **新增 `burnSubs` state + `hasSrt` derived value**：`hasSrt = Boolean(srtText)`
+- [x] **`useEffect` 監聽 `hasSrt`**：`hasSrt` 消失時自動 `setBurnSubs(false)`
+- [x] **React Hooks 規則修正**：所有 `useState` / `hasSrt` 計算 / `useEffect` 移至 `if (!videoExportEnabled) return null` early return 之前
+- [x] **新增 `getExportFilename()` helper**：`burnSubs && hasSrt` 時回傳 `.subbed.mp4`，否則回傳原檔名
+- [x] **Checkbox UI**：位於卡片內、按鈕列上方；生成中時 `opacity-40 pointer-events-none`；勾選變更時呼叫 `onClearCache()` 清除快取
+- [x] **`renderButton` 快取狀態**：使用 `cachedFilename ?? filename` 下載，顯示正確後綴檔名
+
+### 23.4 前端狀態管理（`app/page.tsx`）
+- [x] **新增 `podcastVideoFilename` / `musicVideoFilename` state**：`useState<string | null>(null)`
+- [x] **兩個 `VideoExportBlock` 的 `onCached`**：`(blob, nextFilename) => { setXxxVideoBlob(blob); setXxxVideoFilename(nextFilename); }`
+- [x] **下載總覽影片按鈕**：`onClick` 使用 `podcastVideoFilename ?? buildTaggedName(...)`；`label` 顯示 `podcastVideoFilename ?? 'podcast.mp4'`（反映燒字幕狀態）
+- [x] **兩個 `VideoExportBlock` 傳入 `cachedFilename` / `srtText` props**
+
+### 23.5 Docker（`Dockerfile`）
+- [x] **runner stage 新增 `fontconfig font-noto-cjk`**：確保容器內 Noto Sans CJK TC 字型可用，繁中字幕燒入不缺字
+
 ## 22. 2026-04-19 plan_D 第二批完成項目（SRT 優先架構 + 換頁標記編輯 + cue 排序輸出）
 
 ### 22.1 SRT 優先架構（plan_D SRT-first）

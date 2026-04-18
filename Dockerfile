@@ -40,8 +40,8 @@ FROM node:20-alpine AS runner
 
 # FFmpeg for video export (Step 4.1 / 7.1)
 # Installed unconditionally so VIDEO_EXPORT_ENABLED can be toggled without rebuilding the image.
-# Alpine ffmpeg includes libx264 + aac (Phase 1). Phase 3 adds: libass fontconfig font-noto-cjk
-RUN apk add --no-cache libc6-compat ffmpeg
+# fontconfig + Noto CJK ensure hard-burned zh-TW subtitles render correctly in the container.
+RUN apk add --no-cache libc6-compat ffmpeg fontconfig font-noto-cjk
 
 WORKDIR /app
 

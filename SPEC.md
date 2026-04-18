@@ -2,6 +2,15 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v21 補充亮點（2026-04-19，燒入字幕功能 + cachedFilename 檔名流程）：
+1. **燒入字幕（Burn Subtitles）**：匯出 MP4 前可勾選「燒入字幕」，FFmpeg `subtitles=` filter 將 SRT 永久嵌入畫面；預設不勾選，仍可另行下載 `.srt`；勾選後下載檔名自動加 `.subbed` 後綴（`podcast.subbed.mp4` / `music.subbed.mp4`）。
+2. **`cachedFilename` prop + `onCached(blob, filename)` 簽名**（`components/VideoExportBlock.tsx`）：`onCached` 從 `(blob) => void` 改為 `(blob, filename) => void`，將燒入字幕時的實際檔名一路傳回 `page.tsx`；`cachedFilename` prop 確保「再次下載」與下載總覽均使用正確的 `.subbed.mp4` 或 `.mp4` 名稱。
+3. **`podcastVideoFilename` / `musicVideoFilename` state**（`app/page.tsx`）：新增兩個 `useState<string | null>` 追蹤快取影片的實際檔名；下載總覽的影片按鈕改為顯示並下載 `filename ?? buildTaggedName(...)`，完整反映燒字幕狀態。
+4. **React Hooks 規則修正**（`components/VideoExportBlock.tsx`）：`hasSrt` 計算與 `useEffect`（`hasSrt` 消失時自動清除 `burnSubs`）移至 `if (!videoExportEnabled) return null` early return 之前，符合 React Hooks 規則，無條件執行。
+5. **`getExportFilename()` helper**：`burnSubs` 為 true 且有 SRT 時，將 `.mp4` 後綴替換為 `.subbed.mp4`，產生與快取 key 不同的檔名，避免燒字幕版與原版快取衝突。
+6. **FFmpeg subtitle filter 實作**（`lib/videoExport.ts`）：寫入暫存 `subtitles.srt`；`escapeSrtPath()` 處理 Windows 路徑反斜線與冒號跳脫；`force_style` 指定 `Noto Sans CJK TC` 字型、半透明背景（`BackColour=&HB0000000, BorderStyle=3`）；xfade 模式下以 `[vxf]` 中間節點串接 subtitle filter，concat 模式下直接附加至 `-vf`。
+7. **Docker 字型支援**（`Dockerfile`）：runner stage 新增 `fontconfig font-noto-cjk`，確保容器內燒入繁中字幕不缺字。
+
 ### ✨ v20 補充亮點（2026-04-19，plan_D SRT 優先架構 + D13 縮圖預覽 + D14 cue 排序輸出）：
 1. **SRT 優先（SRT-first）架構**：對齊完成後新增兩階段人工確認流程——先在 `SrtReviewPanel` 確認 SRT 字幕內容，再透過 `SrtCueEditor` 指定每張投影片的換頁起始字幕列，最後才生成 PPTX；任何上游變動會自動廢止下游確認狀態。
 2. **`SrtSlideCue / SlideCueEvent` 兩階段 cue 資料模型**（`lib/types.ts`、`lib/timing.ts`）：`SrtSlideCue {srtId, slideIndex}` 儲存使用者標記；`buildSlideCueEvents()` 對應時間戳；`buildTimingsFromSlideCueEvents()` 衍生 `SlideTimings`（長度 = cue 數 = SRT `[slide-N]` 標籤數）。
@@ -1781,7 +1790,43 @@ idle(forceRegen) → 跳過快取重走流程
 error        → 顯示錯誤訊息 + 手動「重試」按鈕
 ```
 
-### 28.5 環境變數
+### 28.5 燒入字幕（Burn Subtitles）
+
+若已產生 SRT，可在 VideoExportBlock 內勾選「燒入字幕」，FFmpeg 將字幕永久嵌入畫面（hard-coded）。
+
+**前端流程：**
+- `hasSrt = Boolean(srtText)` — SRT prop 存在時顯示 checkbox，消失時自動取消勾選（`useEffect`）
+- `getExportFilename(filename, burnSubs && hasSrt)` — 產生 `.subbed.mp4` 後綴
+- `onCached(blob, filename)` — 將實際檔名傳回 parent，快取版與燒字幕版可同時存在不衝突
+- `onClearCache()` — 勾選 / 取消勾選時通知 parent 清除快取，避免舊版本被再次下載
+
+**後端流程（`lib/videoExport.ts`）：**
+```
+params.burnSubs && params.srtText
+  ↓
+寫入 workDir/subtitles.srt
+escapeSrtPath(srtPath)  → 路徑冒號跳脫（Windows 相容）
+concat 模式：-vf "subtitles='...':force_style='...'"
+xfade 模式：filter_complex 末段 [vxf] → subtitles filter → [vout]
+```
+
+**字型樣式（`SUBTITLE_STYLE`）：**
+```
+Fontname=Noto Sans CJK TC,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0,Fontsize=22
+```
+`BorderStyle=3` = 不透明背景矩形；`BackColour=&HB0000000` = 半透明黑底（ABGR）。
+
+**Docker 字型：**
+runner stage 安裝 `fontconfig font-noto-cjk`，確保繁中字幕不缺字。
+
+**`VideoExportBlock` props 更新：**
+| prop | 型別 | 說明 |
+|------|------|------|
+| `srtText` | `string \| null \| undefined` | SRT 內容；有值才顯示 checkbox |
+| `cachedFilename` | `string \| null \| undefined` | 快取影片的實際檔名（含 `.subbed` 後綴） |
+| `onCached` | `(blob: Blob, filename: string) => void` | 快取完成回調，同時回傳實際檔名 |
+
+### 28.6 環境變數
 
 | 變數 | 說明 | 預設 |
 |------|------|------|

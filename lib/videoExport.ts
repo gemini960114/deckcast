@@ -125,6 +125,17 @@ export function getActiveExports(): number {
   return activeExports;
 }
 
+// ─── Subtitle helpers ────────────────────────────────────────────────────────
+
+// YouTube-style subtitle: semi-transparent black background, system CJK font
+const SUBTITLE_STYLE =
+  'Fontname=Noto Sans CJK TC,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0,Fontsize=22';
+
+// FFmpeg subtitles filter requires forward slashes and escaped colons on Windows
+function escapeSrtPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
 // ─── FFmpeg arg builders ─────────────────────────────────────────────────────
 
 function buildConcatArgs(
@@ -136,14 +147,19 @@ function buildConcatArgs(
   preset: string,
   threads: number,
   outputPath: string,
+  srtPath: string | null = null,
 ): string[] {
   const threadArgs = threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
+  const scale = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`;
+  const vf = srtPath
+    ? `${scale},subtitles='${escapeSrtPath(srtPath)}':force_style='${SUBTITLE_STYLE}'`
+    : scale;
   return [
     '-y',
     ...threadArgs,
     '-f', 'concat', '-safe', '0', '-i', path.join(workDir, 'slides.txt'),
     '-i', audioPath,
-    '-vf', `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`,
+    '-vf', vf,
     '-c:v', 'libx264', '-preset', preset, '-crf', '23', '-pix_fmt', 'yuv420p',
     '-c:a', 'aac', '-b:a', '192k',
     '-movflags', '+faststart',
@@ -177,6 +193,7 @@ function buildXfadeArgs(
   preset: string,
   threads: number,
   outputPath: string,
+  srtPath: string | null = null,
 ): string[] {
   const n = timings.length;
 
@@ -223,16 +240,23 @@ function buildXfadeArgs(
   //   offset = timings[i].endSec - fadeDur
   // This ensures slide i+1 is fully visible exactly at audio time timings[i].endSec,
   // matching PPTX behaviour (advTm = durationSec - 0.75s for non-last slides).
+  const xfadeOutTag = srtPath ? '[vxf]' : '[vout]';
   for (let i = 0; i < n - 1; i++) {
     const fadeDur = fadeDurs[i];
     const offset = timings[i].endSec - fadeDur;
 
     const inputA = i === 0 ? '[v0s]' : `[xf${i - 1}]`;
     const inputB = `[v${i + 1}s]`;
-    const outputTag = i === n - 2 ? '[vout]' : `[xf${i}]`;
+    const outputTag = i === n - 2 ? xfadeOutTag : `[xf${i}]`;
 
     filterParts.push(
       `${inputA}${inputB}xfade=transition=fade:duration=${fadeDur.toFixed(3)}:offset=${offset.toFixed(3)}${outputTag}`,
+    );
+  }
+
+  if (srtPath) {
+    filterParts.push(
+      `${xfadeOutTag}subtitles='${escapeSrtPath(srtPath)}':force_style='${SUBTITLE_STYLE}'[vout]`,
     );
   }
 
@@ -259,7 +283,8 @@ export interface GenerateVideoParams {
   audioMimeType: string;
   transition?: 'fade' | 'none';
   resolution?: '720p' | '1080p';
-  // srt: omitted in Phase 1 (subtitles are separate download)
+  srtText?: string;         // raw SRT content for hard-coded subtitle burn-in
+  burnSubs?: boolean;       // if true + srtText provided, burn subtitles into video
 }
 
 export async function generateVideo(params: GenerateVideoParams): Promise<ArrayBuffer> {
@@ -279,8 +304,12 @@ export async function generateVideo(params: GenerateVideoParams): Promise<ArrayB
     const audioPath = path.join(workDir, `audio.${audioExt}`);
     await fs.writeFile(audioPath, Buffer.from(params.audioBase64, 'base64'));
 
-    // 3. Phase 1: no SRT burn-in. Subtitles are separate download.
-    //    Phase 3: add subtitles filter here (requires libass + font-noto-cjk in Dockerfile).
+    // 3. Write SRT file if burn-in is requested
+    let srtPath: string | null = null;
+    if (params.burnSubs && params.srtText) {
+      srtPath = path.join(workDir, 'subtitles.srt');
+      await fs.writeFile(srtPath, params.srtText, 'utf8');
+    }
 
     // 4. Build concat demuxer file (needed for 'none' / single-slide path)
     const concatLines: string[] = [];
@@ -302,8 +331,8 @@ export async function generateVideo(params: GenerateVideoParams): Promise<ArrayB
 
     const useFade = params.transition === 'fade' && params.timings.length > 1;
     const ffmpegArgs = useFade
-      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath)
-      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath);
+      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath)
+      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath);
 
     console.log(
       `[VideoExport] Starting FFmpeg: ${params.images.length} slides, ` +

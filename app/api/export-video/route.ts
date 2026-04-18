@@ -22,7 +22,8 @@ interface ExportVideoRequest {
   audioMimeType: string;
   transition?: 'fade' | 'none';
   resolution?: '720p' | '1080p';
-  srt?: string; // reserved for Phase 3 subtitle burn-in; ignored in Phase 1
+  srtText?: string;
+  burnSubs?: boolean;
 }
 
 export async function POST(req: NextRequest) {
@@ -111,6 +112,8 @@ export async function POST(req: NextRequest) {
     audioMimeType: body.audioMimeType,
     transition: body.transition,
     resolution: body.resolution ?? '1080p',
+    srtText: body.burnSubs ? (body.srtText ?? undefined) : undefined,
+    burnSubs: body.burnSubs === true && !!body.srtText,
   };
 
   try {

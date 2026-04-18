@@ -102,9 +102,11 @@
 - PPTX 與 MP4 共用同一套 `resolveEffectiveTransitionSec()` 計算轉場時長，確保兩者時間語意完全一致：timings 代表「新頁完全可見的時間點」，在 PPTX 與 MP4 均成立
 - **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = SRT `[slide-N]` cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同，修復舊版 `images length must match timings length` 錯誤）
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
+- 若已有 SRT，可在匯出前勾選「燒入字幕」，將字幕永久嵌入畫面；未勾選時仍可另外下載 `.srt`
 - 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg
 - 點選「重新生成」會立即清除快取並重新合成；「重試」在錯誤後也會直接重跑，無需再次手動點擊
 - 以下情況會自動清除影片快取（需重新匯出）：重新生成或上傳音訊、重跑 Step 4 / Step 7 PPTX 對齊、套用偏移至轉場、載入歷史紀錄或開新專案
+- 容器版 Docker image 會一併安裝 `fontconfig` 與 `Noto CJK`，確保繁中字卡拉 OK/字幕燒入時不會缺字
 - 需要 `VIDEO_EXPORT_ENABLED=true` 及容器內安裝 FFmpeg（Dockerfile 已內建）
 - 本地 Windows 開發時需額外設定 `VIDEO_FFMPEG_BIN` 指向 FFmpeg bin 目錄
 
@@ -145,10 +147,12 @@
 | `music.srt` | 音樂字幕 | 音樂對齊完成後 |
 | `podcast.pptx` | Podcast 同步簡報 | Step 4 完成後 |
 | `music.pptx` | 音樂同步簡報 | Step 7 完成後 |
-| `podcast.mp4` | Podcast 影片（1080p，含 fade 轉場） | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
-| `music.mp4` | 音樂影片（1080p，含 fade 轉場） | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `podcast.mp4` / `podcast.subbed.mp4` | Podcast 影片（1080p，含 fade 轉場）；勾選燒入字幕時檔名加 `.subbed` | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `music.mp4` / `music.subbed.mp4` | 音樂影片（1080p，含 fade 轉場）；勾選燒入字幕時檔名加 `.subbed` | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
 
 > **實際下載檔名帶時間戳記**：以上顯示名稱僅為按鈕文字。實際下載的檔案會自動帶上 `_HHmmss` 時間標籤（本地時間），例如 `script_181646.txt`、`podcast_181646.pptx`、`podcast_181646.mp4`。Podcast 系列以文稿生成時間為錨點，音樂系列以歌詞生成時間為錨點。同一工作階段多次下載可安全共存，不會互相覆蓋。
+>
+> **燒字幕版檔名**：勾選「燒入字幕」後匯出的 MP4 會在時間戳記後加 `.subbed` 後綴，例如 `podcast_181646.subbed.mp4`，與未燒字幕版（`podcast_181646.mp4`）並存不衝突；下載總覽的影片按鈕會即時反映目前快取版本的實際檔名。
 
 ---
 

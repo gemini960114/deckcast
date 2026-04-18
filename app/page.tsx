@@ -368,6 +368,8 @@ export default function Home() {
   const [musicSrtConfirmed, setMusicSrtConfirmed] = useState(false);
   const [podcastVideoBlob, setPodcastVideoBlob] = useState<Blob | null>(null);
   const [musicVideoBlob, setMusicVideoBlob] = useState<Blob | null>(null);
+  const [podcastVideoFilename, setPodcastVideoFilename] = useState<string | null>(null);
+  const [musicVideoFilename, setMusicVideoFilename] = useState<string | null>(null);
   const [scriptGeneratedAt, setScriptGeneratedAt] = useState<number | null>(null);
   const [lyricsGeneratedAt, setLyricsGeneratedAt] = useState<number | null>(null);
   const [lyricsContentSource, setLyricsContentSource] = useState<'script' | 'slides'>('script');
@@ -488,6 +490,18 @@ export default function Home() {
       setHistory(await getAllRecords());
     })();
   }, [authEnabled, authEmail, authReady]);
+
+  useEffect(() => {
+    if (!podcastVideoBlob) {
+      setPodcastVideoFilename(null);
+    }
+  }, [podcastVideoBlob]);
+
+  useEffect(() => {
+    if (!musicVideoBlob) {
+      setMusicVideoFilename(null);
+    }
+  }, [musicVideoBlob]);
 
   async function loadHistory() {
     if (authEnabled) {
@@ -2114,10 +2128,15 @@ export default function Home() {
             filename={buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'mp4')}
             displayName="podcast.mp4"
             cachedBlob={podcastVideoBlob}
-            onCached={setPodcastVideoBlob}
+            cachedFilename={podcastVideoFilename}
+            onCached={(blob, nextFilename) => {
+              setPodcastVideoBlob(blob);
+              setPodcastVideoFilename(nextFilename);
+            }}
             onClearCache={() => setPodcastVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
+            srtText={podcastSrt}
           />
         )}
 
@@ -2337,10 +2356,15 @@ export default function Home() {
             filename={buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp4')}
             displayName="music.mp4"
             cachedBlob={musicVideoBlob}
-            onCached={setMusicVideoBlob}
+            cachedFilename={musicVideoFilename}
+            onCached={(blob, nextFilename) => {
+              setMusicVideoBlob(blob);
+              setMusicVideoFilename(nextFilename);
+            }}
             onClearCache={() => setMusicVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
+            srtText={musicSrt}
           />
         )}
 
@@ -2409,18 +2433,18 @@ export default function Home() {
                 <div className="grid grid-cols-2 gap-2">
                   {podcastVideoBlob && (
                     <button
-                      onClick={() => downloadBlob(podcastVideoBlob, buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'mp4'))}
+                      onClick={() => downloadBlob(podcastVideoBlob, podcastVideoFilename ?? buildTaggedName('podcast', getPodcastTag(scriptGeneratedAt), 'mp4'))}
                       className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
                     >
-                      ⬇ podcast.mp4
+                      ⬇ {podcastVideoFilename ?? 'podcast.mp4'}
                     </button>
                   )}
                   {musicVideoBlob && (
                     <button
-                      onClick={() => downloadBlob(musicVideoBlob, buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp4'))}
+                      onClick={() => downloadBlob(musicVideoBlob, musicVideoFilename ?? buildTaggedName('music', getMusicTag(lyricsGeneratedAt), 'mp4'))}
                       className={`flex items-center justify-center gap-1 px-2 py-2 rounded-xl text-[11px] font-semibold border transition-all ${t.dlBtn(true, false)}`}
                     >
-                      ⬇ music.mp4
+                      ⬇ {musicVideoFilename ?? 'music.mp4'}
                     </button>
                   )}
                 </div>
