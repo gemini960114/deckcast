@@ -1,4 +1,4 @@
-import type { MusicTransitionMatch, SlideTimings, SrtEntry } from './types';
+import type { LyricSection, LyricVisualTag, MusicTransitionMatch, SlideTimings, SrtEntry, VisualCueMatch, VisualCueTiming } from './types';
 
 export function getAudioDuration(blob: Blob): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -111,6 +111,65 @@ export function parseLyricsTimings(
   }
 
   return timings;
+}
+
+export function parseLyricSections(lyrics: string): LyricSection[] {
+  const lines = lyrics.split('\n');
+  const sections: LyricSection[] = [];
+  let current: LyricSection | null = null;
+  let sectionIndex = 0;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const headerMatch = line.match(/^\[([^\]]+)\]\s*\[Slide\s*(\d+)\]/i);
+    if (headerMatch) {
+      if (current) sections.push(current);
+      sectionIndex++;
+      const visualTag: LyricVisualTag = { kind: 'slide', slideIndex: parseInt(headerMatch[2], 10) };
+      current = {
+        sectionIndex,
+        sectionLabel: headerMatch[1].trim(),
+        visualTag,
+        rawHeader: line,
+        lines: [],
+      };
+      continue;
+    }
+    if (current && line) current.lines.push(line);
+  }
+  if (current) sections.push(current);
+  return sections;
+}
+
+export function buildVisualCueTimings(
+  sections: LyricSection[],
+  matches: VisualCueMatch[],
+  srtEntries: SrtEntry[],
+  totalDuration: number
+): VisualCueTiming[] {
+  const idToEntry = new Map(srtEntries.map(e => [e.id, e]));
+  const matchByCue = new Map(matches.map(m => [m.cueIndex, m]));
+
+  const startTimes: Array<number | null> = sections.map((_, i) => {
+    if (i === 0) return 0;
+    const match = matchByCue.get(i + 1);
+    if (!match || match.startSrtId == null) return null;
+    return idToEntry.get(match.startSrtId)?.start ?? null;
+  });
+
+  const resolved = interpolateStartTimes(startTimes, totalDuration);
+
+  return sections.map((section, i) => {
+    const startSec = i === 0 ? 0 : resolved[i];
+    const endSec = i + 1 < resolved.length ? resolved[i + 1] : totalDuration;
+    return {
+      cueIndex: section.sectionIndex,
+      slideIndex: section.visualTag.slideIndex,
+      startSec,
+      endSec,
+      durationSec: Math.max(endSec - startSec, 0.5),
+    };
+  });
 }
 
 function ensureFinalTimings(timings: SlideTimings, slideCount: number, totalDuration: number): SlideTimings {
@@ -227,48 +286,45 @@ export function buildMusicFallbackTimingsByLyricsWeight(
   slideCount: number,
   totalDuration: number
 ): SlideTimings {
-  const sections: string[] = [];
-  const slideRegex = /\[Slide\s*(\d+)\][^\n]*\n?/gi;
-  const matches = [...lyrics.matchAll(slideRegex)];
+  const sections = parseLyricSections(lyrics);
+  if (sections.length === 0) return equalDistribution(slideCount, totalDuration);
 
-  if (matches.length === 0) {
-    return equalDistribution(slideCount, totalDuration);
+  const cueWeights: Array<{ slideIndex: number; weight: number }> = [];
+  for (const section of sections) {
+    cueWeights.push({
+      slideIndex: section.visualTag.slideIndex,
+      weight: Math.max(section.lines.length, 1),
+    });
   }
 
-  for (let i = 0; i < matches.length; i++) {
-    const start = (matches[i].index ?? 0) + matches[i][0].length;
-    const end = i + 1 < matches.length ? matches[i + 1].index ?? lyrics.length : lyrics.length;
-    const cleaned = lyrics.slice(start, end)
-      .split('\n')
-      .map(line => line.trim())
-      .filter(line => line)
-      .filter(line => !/^\[\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\]/.test(line))
-      .filter(line => !/^\[(verse|chorus|bridge|outro|intro)/i.test(line))
-      .join('\n');
-    sections.push(cleaned);
+  if (cueWeights.length === 0) return equalDistribution(slideCount, totalDuration);
+
+  const totalWeight = cueWeights.reduce((sum, c) => sum + c.weight, 0);
+  const slideFirstSec = new Map<number, number>();
+  let elapsed = 0;
+  for (const cue of cueWeights) {
+    if (!slideFirstSec.has(cue.slideIndex)) {
+      slideFirstSec.set(cue.slideIndex, (elapsed / totalWeight) * totalDuration);
+    }
+    elapsed += cue.weight;
   }
 
-  const weights = Array.from({ length: slideCount }, (_, index) => {
-    const text = sections[index] ?? '';
-    return Math.max(text.replace(/\s+/g, '').length, 1);
-  });
-  const totalWeight = weights.reduce((sum, value) => sum + value, 0);
+  const startTimes: Array<number | null> = Array.from(
+    { length: slideCount },
+    (_, i) => slideFirstSec.get(i + 1) ?? null
+  );
+  if (startTimes[0] === null) startTimes[0] = 0;
 
-  let currentSec = 0;
-  const timings: SlideTimings = weights.map((weight, index) => {
-    const duration = totalWeight > 0 ? (totalDuration * weight) / totalWeight : totalDuration / slideCount;
-    const startSec = currentSec;
-    const endSec = index === slideCount - 1 ? totalDuration : currentSec + duration;
-    currentSec = endSec;
+  const resolved = interpolateStartTimes(startTimes, totalDuration);
+  return resolved.map((startSec, i) => {
+    const endSec = i + 1 < resolved.length ? resolved[i + 1] : totalDuration;
     return {
-      slideIndex: index + 1,
-      startSec,
+      slideIndex: i + 1,
+      startSec: i === 0 ? 0 : startSec,
       endSec,
       durationSec: Math.max(endSec - startSec, 0.5),
     };
   });
-
-  return ensureFinalTimings(timings, slideCount, totalDuration);
 }
 
 export function buildPodcastFallbackTimingsByScriptWeight(

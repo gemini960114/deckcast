@@ -385,8 +385,7 @@
 - [x] **`handleCancelScriptEdit()`**：清空 `scriptDraft`，設 `isEditingScript = false`，不修改正式腳本
 - [x] **`handleSaveScriptEdit()`**：將 `scriptDraft` 寫回 `script`，更新 `scriptGeneratedAt` 為當下時間，清除所有依賴腳本的下游產物，並同步寫入 IndexedDB
   - 一律清除：Podcast 音訊（`podcastBlob`）、PPTX、SRT、timings、diagnostics、video（呼叫 `resetPodcastDerivedState()`）、Step 3 / Step 4 state
-  - `duo` 模式才清除：lyrics、lyricsGeneratedAt、musicBlob、及整條 music chain（呼叫 `resetMusicDerivedState()`）、Step 5 / 6 / 7 state
-  - `solo_explainer` / `solo_story` 模式不清 lyrics / music 系列產物
+  - **所有模式均清除**：lyrics、lyricsGeneratedAt、musicBlob、及整條 music chain（呼叫 `resetMusicDerivedState()`）、Step 5 / 6 / 7 state（plan_A 後所有模式統一行為，solo_* 亦清除）
   - IndexedDB 同步更新（`updateRecord`）
 
 ### 18.3 Step 2 UI 改版（`app/page.tsx`）
@@ -395,3 +394,78 @@
 
 ### 18.4 Step 3~7 鎖定（`app/page.tsx`）
 - [x] **編輯期間 Step 3~7 全部 disabled**：所有 StepCard 的 `disabled` 條件加入 `|| isEditingScript`，防止在 draft 與 live script 並存時誤操作後續流程
+
+## 19. 2026-04-18 plan_A 完成項目（歌詞手動後製編修）
+
+### 19.1 State 新增（`app/page.tsx`）
+- [x] **`isEditingLyrics` state**：`useState(false)`，控制 Step 5 是否進入歌詞編輯模式
+- [x] **`lyricsDraft` state**：`useState('')`，編輯期間的暫存草稿，不持久化
+
+### 19.2 Handler 新增（`app/page.tsx`）
+- [x] **`handleStartLyricsEdit()`**：將 `lyrics` 複製至 `lyricsDraft`，設 `isEditingLyrics = true`
+- [x] **`handleCancelLyricsEdit()`**：清空 `lyricsDraft`，設 `isEditingLyrics = false`，不修改正式歌詞
+- [x] **`handleSaveLyricsEdit()`**：將 `lyricsDraft` 寫回 `lyrics`，更新 `lyricsGeneratedAt` 為當下時間，清除整條 Music 鏈（musicBlob / SRT / timings / PPTX / MP4），同步寫入 IndexedDB
+
+### 19.3 失效鏈清除擴展（`app/page.tsx`）
+- [x] **`handleSaveScriptEdit()` 擴展**：所有模式（duo / solo_*）儲存 script 後均清除 lyrics / lyricsGeneratedAt / Music 鏈；移除舊版「solo_* 不清 lyrics」分支，統一所有模式行為
+
+### 19.4 Step 5 UI 改版（`app/page.tsx`）
+- [x] **正常模式**：TextBlock 唯讀 + 新增「編輯歌詞」ActionBtn
+- [x] **編輯模式**：固定高度 `<textarea>` + 警示小字（儲存後清 Music 鏈）+ 「儲存修改」/「取消」按鈕
+- [x] **Step 6 / 7 編輯期間 disabled**：StepCard `disabled` 條件加入 `|| isEditingLyrics`
+
+## 20. 2026-04-18 plan_B 完成項目（cueIndex 架構 + [No Slide] 移除）
+
+### 20.1 新型別（`lib/types.ts`）
+- [x] **`LyricVisualTag` 簡化**：移除 `no-slide` union 分支；改為純 `{ kind: 'slide'; slideIndex: number }`，每個段落必須對應 Slide N
+- [x] **`LyricSection`**：`{ sectionIndex, sectionLabel, visualTag: LyricVisualTag, rawHeader, lines }`
+- [x] **`VisualCueMatch`**：`{ cueIndex, slideIndex, startSrtId, confidence?, matchReason? }`（以 cueIndex 識別段落，非 slideIndex）
+- [x] **`VisualCueTiming`**：`{ cueIndex, slideIndex, startSec, endSec, durationSec }`
+
+### 20.2 新函式（`lib/timing.ts`）
+- [x] **`parseLyricSections(lyrics: string): LyricSection[]`**：解析 `[SectionLabel] [Slide N]` 格式的 headers；不匹配的行列入前一段落的 `lines`；無法解析時回傳 `[]`
+- [x] **`buildVisualCueTimings(sections, matches, srtEntries, totalDuration): VisualCueTiming[]`**：使用 `interpolateStartTimes` 為每個 cue 計算 startSec/endSec；直接從 `section.visualTag.slideIndex` 取得 slideIndex
+- [x] **`buildMusicFallbackTimingsByLyricsWeight()` 改用原始歌詞**：接收 `lyrics`（未剝離標記的原始文字）而非 `structuredLyrics`，確保 `parseLyricSections()` 能正確找到段落標題
+
+### 20.3 align-music route 重構（`app/api/align-music/route.ts`）
+- [x] **移除 `extractSlideCount()`**：改用 `parseLyricSections(lyrics)` 後以 `Math.max(...sections.map(s => s.visualTag.slideIndex))` 取得 slideCount
+- [x] **`buildVisualCueSummary(sections: LyricSection[]): string`**：取代 `buildSlideAnchorSummary()`，輸出 `cueIndex / sectionLabel / slideIndex / 前後文脈行`
+- [x] **`parseVisualCueMatchesJSON(raw, sectionCount, srtEntries): VisualCueMatch[]`**：取代 `parseTransitionMatchesJSON()`，驗證 `cueIndex` 在 `1..sectionCount` 範圍，依 cueIndex 排序
+- [x] **Fallback 修正（關鍵 bug fix）**：`buildMusicFallbackTimingsByLyricsWeight()` 呼叫改為傳入 `lyrics`（原始歌詞）而非 `structuredLyrics`（標記已剝離），確保 section-based fallback 能找到段落
+- [x] **舊版相容 legacyMatches**：從 `visualCueMatches` 推導 `legacyMatches`（每個 slideIndex 第一次出現的 cueIndex），用於生成 PPTX/MP4 時的 `SlideTimings`
+- [x] **回傳擴充**：response 新增 `visualCueTimings` 欄位，保留完整段落序列
+
+### 20.4 Phase 2 Prompt 更新（`lib/prompts.ts`）
+- [x] **`FIND_TRANSITIONS_PROMPT` cueIndex 契約**：資料 A 的欄位改為 `cueIndex / sectionLabel / slideIndex`（slideIndex 不再 nullable）；輸出格式改為 `cueIndex` 為 key；規則說明不可修改 cueIndex、不可省略任何 cueIndex
+- [x] **`LYRICS_PROMPT_TIMED` 移除 [No Slide]**：段落標記規則改為必須輸出 `[Slide N]`；提供 fallback 規則（第一段 → Slide 1，中途不確定 → 延續前一段）；錯誤範例更新，不再包含 `[No Slide]` 選項
+
+### 20.5 前端 state（`app/page.tsx`）
+- [x] **`musicVisualCueTimings` state**：`useState<VisualCueTiming[] | null>(null)`
+- [x] **Step 7 response 處理**：從 `data.visualCueTimings` 回填 `musicVisualCueTimings`
+- [x] **reset / load / newProject 均補齊 `setMusicVisualCueTimings(null)`**
+
+## 21. 2026-04-18 plan_C 完成項目（Step 5 歌詞內容依據選擇器）
+
+### 21.1 型別與 Record（`lib/types.ts`）
+- [x] **`GenerationRecord` 新增 `lyricsContentSource?: 'script' | 'slides'`**
+
+### 21.2 前端 State 與 Handler（`app/page.tsx`）
+- [x] **`lyricsContentSource` state**：`useState<'script' | 'slides'>('script')`
+- [x] **`handleLyricsContentSourceChange(nextSource)`**：
+  - 若無現有歌詞且無 Music 鏈：直接更新 state + 寫 DB
+  - 否則：inline 重置所有 Music 鏈 state（不呼叫 `resetMusicDerivedState()` 以避免雙重 updateRecord）+ 單次 `updateRecord` 寫 DB
+  - 顯示 toast：`'已切換歌詞內容依據，請重新生成歌詞。'`
+
+### 21.3 Step 5 Guard 修正（`app/page.tsx`）
+- [x] **StepCard disabled 改為 source-aware**：`(lyricsContentSource === 'slides' ? !slides : !script) || isEditingScript`
+- [x] **`handleGenerateLyrics()` guard 改為 source-aware**：`const hasSource = lyricsContentSource === 'slides' ? !!slides : !!script`
+- [x] **API 呼叫補傳 `lyricsSource`**：`lyricsSourceText = lyricsContentSource === 'slides' ? slides : script`
+
+### 21.4 Step 5 UI 新增選單
+- [x] **「歌詞內容依據」下拉**：`依講稿生成`（預設）/ `依投影片生成`；生成中或編輯期間 disabled
+- [x] **說明小字**：「依講稿生成：歌詞貼近敘事與鋪陳；依投影片生成：歌詞聚焦投影片重點」
+
+### 21.5 loadRecord / handleNewProject / handleNarrationModeChange
+- [x] **`loadRecord()` 回填 `lyricsContentSource`**：`rec.lyricsContentSource ?? 'script'`
+- [x] **`handleNewProject()` 重置**：`setLyricsContentSource('script')`
+- [x] **`handleNarrationModeChange()` 重置 `musicVisualCueTimings`**（plan_B state 一致性）

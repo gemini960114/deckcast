@@ -9,7 +9,7 @@ import { calcPodcastTimings, calcMusicTimings, normalizeTimings, getAudioDuratio
 import { adjustSrtTimes } from '@/lib/srt';
 import { saveRecord, updateRecord, getAllRecords, getRecordsByOwner, deleteRecord } from '@/lib/db';
 import { clearAuthSession, isAuthEnabledClient, readStoredAuthSession, storeAuthSession, type AuthSession } from '@/lib/authClient';
-import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, NarrationLengthPreset, StepState, SlideTimings, TtsGenerationMode } from '@/lib/types';
+import type { AlignMusicDiagnostics, AlignPodcastDiagnostics, ContentLanguage, GenerationRecord, NarrationMode, NarrationLengthPreset, StepState, SlideTimings, TtsGenerationMode, VisualCueTiming } from '@/lib/types';
 import { MUSIC_STYLES, VOICES } from '@/lib/types';
 import {
   AUTH_EMAIL_KEY, AUTH_TOKEN_KEY, SESSION_KEY,
@@ -357,10 +357,12 @@ export default function Home() {
   const [musicSrtOffset, setMusicSrtOffset] = useState<number>(0);
   const [podcastTimings, setPodcastTimings] = useState<SlideTimings | null>(null);
   const [musicTimings, setMusicTimings] = useState<SlideTimings | null>(null);
+  const [musicVisualCueTimings, setMusicVisualCueTimings] = useState<VisualCueTiming[] | null>(null);
   const [podcastVideoBlob, setPodcastVideoBlob] = useState<Blob | null>(null);
   const [musicVideoBlob, setMusicVideoBlob] = useState<Blob | null>(null);
   const [scriptGeneratedAt, setScriptGeneratedAt] = useState<number | null>(null);
   const [lyricsGeneratedAt, setLyricsGeneratedAt] = useState<number | null>(null);
+  const [lyricsContentSource, setLyricsContentSource] = useState<'script' | 'slides'>('script');
   const [step1State, setStep1State] = useState<StepState>({ status: 'idle' });
   const [step1LoadingMsg, setStep1LoadingMsg] = useState('正在解析 PDF 投影片...');
   const [step2State, setStep2State] = useState<StepState>({ status: 'idle' });
@@ -380,6 +382,8 @@ export default function Home() {
   const [dragging, setDragging] = useState(false);
   const [isEditingScript, setIsEditingScript] = useState(false);
   const [scriptDraft, setScriptDraft] = useState('');
+  const [isEditingLyrics, setIsEditingLyrics] = useState(false);
+  const [lyricsDraft, setLyricsDraft] = useState('');
 
   const step2Ref = useRef<HTMLDivElement>(null);
   const step3Ref = useRef<HTMLDivElement>(null);
@@ -394,7 +398,6 @@ export default function Home() {
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
   const isDuo = narrationMode === 'duo';
-  const lyricsSource = isDuo ? script : slides;
   const textModelOptions = localLlmEnabled
     ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
       ? { ...option, label: localLlmLabel }
@@ -535,6 +538,7 @@ export default function Home() {
     setMusicDiagnostics(null);
     setStep7State({ status: 'idle' });
     setMusicTimings(null);
+    setMusicVisualCueTimings(null);
     setMusicSrtOffset(0);
     setMusicVideoBlob(null);
     if (recordId) {
@@ -574,16 +578,16 @@ export default function Home() {
     setStep3State({ status: 'idle' });
     setStep4State({ status: 'idle' });
 
-    // duo 模式才清歌詞 / 音樂鏈
-    if (narrationMode === 'duo') {
-      resetMusicDerivedState();
-      setLyrics('');
-      setLyricsGeneratedAt(null);
-      setMusicBlob(null);
-      setStep5State({ status: 'idle' });
-      setStep6State({ status: 'idle' });
-      setStep7State({ status: 'idle' });
-    }
+    // 所有模式都清歌詞 / 音樂鏈（Step 5 歌詞來源統一為 script）
+    resetMusicDerivedState();
+    setLyrics('');
+    setLyricsGeneratedAt(null);
+    setMusicBlob(null);
+    setIsEditingLyrics(false);
+    setLyricsDraft('');
+    setStep5State({ status: 'idle' });
+    setStep6State({ status: 'idle' });
+    setStep7State({ status: 'idle' });
 
     if (recordId) {
       await updateRecord(recordId, {
@@ -595,18 +599,55 @@ export default function Home() {
         podcastTimings: undefined,
         podcastDiagnostics: undefined,
         podcastVideoBlob: undefined,
-        ...(narrationMode === 'duo'
-          ? {
-              lyrics: undefined,
-              lyricsGeneratedAt: undefined,
-              musicBlob: undefined,
-              musicPptxBlob: undefined,
-              musicSrt: undefined,
-              musicTimings: undefined,
-              musicDiagnostics: undefined,
-              musicVideoBlob: undefined,
-            }
-          : {}),
+        lyrics: undefined,
+        lyricsGeneratedAt: undefined,
+        musicBlob: undefined,
+        musicSource: undefined,
+        musicPptxBlob: undefined,
+        musicSrt: undefined,
+        musicTimings: undefined,
+        musicDiagnostics: undefined,
+        musicVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
+  function handleStartLyricsEdit() {
+    setLyricsDraft(lyrics);
+    setIsEditingLyrics(true);
+  }
+
+  function handleCancelLyricsEdit() {
+    setIsEditingLyrics(false);
+    setLyricsDraft('');
+  }
+
+  async function handleSaveLyricsEdit() {
+    const nextLyrics = lyricsDraft.trim();
+    if (!nextLyrics) return;
+
+    const now = Date.now();
+
+    setLyrics(lyricsDraft);
+    setLyricsGeneratedAt(now);
+    setIsEditingLyrics(false);
+    setLyricsDraft('');
+
+    setMusicBlob(null);
+    setStep6State({ status: 'idle' });
+    resetMusicDerivedState();
+
+    if (recordId) {
+      await updateRecord(recordId, {
+        lyrics: lyricsDraft,
+        lyricsGeneratedAt: now,
+        musicBlob: undefined,
+        musicSource: undefined,
+        musicPptxBlob: undefined,
+        musicSrt: undefined,
+        musicTimings: undefined,
+        musicDiagnostics: undefined,
+        musicVideoBlob: undefined,
       }, normalizedOwnerEmail);
     }
   }
@@ -930,15 +971,44 @@ export default function Home() {
     }
   }
 
+  async function handleLyricsContentSourceChange(nextSource: 'script' | 'slides') {
+    if (nextSource === lyricsContentSource) return;
+    setLyricsContentSource(nextSource);
+    const hasGeneratedLyrics = !!lyrics;
+    const hasMusicChain = !!musicBlob || !!musicPptxBlob || !!musicSrt || !!musicTimings || !!musicVideoBlob;
+    if (!hasGeneratedLyrics && !hasMusicChain) {
+      if (recordId) await updateRecord(recordId, { lyricsContentSource: nextSource }, normalizedOwnerEmail);
+      return;
+    }
+    setLyrics(''); setLyricsGeneratedAt(null);
+    setStep5State({ status: 'idle' });
+    setIsEditingLyrics(false); setLyricsDraft('');
+    setMusicBlob(null); setStep6State({ status: 'idle' });
+    setMusicPptxBlob(null); setMusicSrt(''); setMusicDiagnostics(null);
+    setStep7State({ status: 'idle' }); setMusicTimings(null); setMusicVisualCueTimings(null);
+    setMusicSrtOffset(0); setMusicVideoBlob(null);
+    if (recordId) {
+      await updateRecord(recordId, {
+        lyricsContentSource: nextSource,
+        lyrics: undefined, lyricsGeneratedAt: undefined,
+        musicBlob: undefined, musicSource: undefined, musicPptxBlob: undefined,
+        musicSrt: undefined, musicTimings: undefined, musicDiagnostics: undefined, musicVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+    setToast('已切換歌詞內容依據，請重新生成歌詞。');
+  }
+
   async function handleGenerateLyrics() {
-    if (!script) return; setStep5State({ status: 'loading' });
+    const hasSource = lyricsContentSource === 'slides' ? !!slides : !!script;
+    if (!hasSource) return; setStep5State({ status: 'loading' });
     try {
-      const res = await apiFetch('/api/generate-lyrics', { lyricsSource, styleId, duration: lyricsDuration, textModel, contentLanguage });
+      const lyricsSourceText = lyricsContentSource === 'slides' ? slides : script;
+      const res = await apiFetch('/api/generate-lyrics', { script, lyricsSource: lyricsSourceText, styleId, duration: lyricsDuration, textModel, contentLanguage });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const now = Date.now();
       setLyrics(data.lyrics); setLyricsGeneratedAt(now); setStep5State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, lyricsGeneratedAt: now, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel, contentLanguage }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { lyrics: data.lyrics, lyricsGeneratedAt: now, lyricsContentSource, styleId, lyricsDuration, musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '', textModel, contentLanguage }, normalizedOwnerEmail);
       setTimeout(() => step6Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep5State({ status: 'error', error: String(e) }); setToast('歌詞生成失敗：' + String(e)); }
   }
@@ -1018,6 +1088,7 @@ export default function Home() {
       let timings;
       let srt = '';
       let diagnostics: AlignMusicDiagnostics | null = null;
+      let visualCueTimings: VisualCueTiming[] | null = null;
       if (res.ok) {
         const data = await res.json();
         diagnostics = data.diagnostics ?? null;
@@ -1025,6 +1096,9 @@ export default function Home() {
           ? normalizeTimings(data.timings, slideCount, duration)
           : await calcMusicTimings(slideCount, musicBlob, lyrics);
         srt = data.srt ?? '';
+        visualCueTimings = Array.isArray(data.visualCueTimings) && data.visualCueTimings.length > 0
+          ? data.visualCueTimings
+          : null;
       } else {
         console.warn('API align-music failed, falling back to heuristic calculation.', await res.text());
         timings = await calcMusicTimings(slideCount, musicBlob, lyrics);
@@ -1035,6 +1109,7 @@ export default function Home() {
       setMusicPptxBlob(pptx); setMusicSrt(srt); setStep7State({ status: 'done' });
       setMusicDiagnostics(diagnostics);
       setMusicTimings(timings);
+      setMusicVisualCueTimings(visualCueTimings);
       if (recordId) {
         await updateRecord(recordId, {
           musicPptxBlob: pptx,
@@ -1095,8 +1170,11 @@ export default function Home() {
     if (rec.musicSrt) setMusicSrt(rec.musicSrt); else setMusicSrt('');
     if (rec.musicDiagnostics) setMusicDiagnostics(rec.musicDiagnostics); else setMusicDiagnostics(null);
     if (rec.musicTimings) setMusicTimings(rec.musicTimings); else setMusicTimings(null);
+    setMusicVisualCueTimings(null);
+    setLyricsContentSource(rec.lyricsContentSource ?? 'script');
     setScriptGeneratedAt(rec.scriptGeneratedAt ?? null);
     setLyricsGeneratedAt(rec.lyricsGeneratedAt ?? null);
+    setIsEditingLyrics(false); setLyricsDraft('');
     setPodcastVideoBlob(null); setMusicVideoBlob(null);
     setPodcastSrtOffset(0); setMusicSrtOffset(0);
     setRecordId(rec.id); setDrawerOpen(false);
@@ -1110,6 +1188,7 @@ export default function Home() {
       // Clear mode-derived text content so stale duo/solo script can't be used downstream
       setScript(''); setScriptGeneratedAt(null);
       setLyrics(''); setLyricsGeneratedAt(null);
+      setIsEditingLyrics(false); setLyricsDraft('');
       // Reset all step states (step 3–7 depend on correct script/lyrics)
       setStep2State({ status: 'idle' });
       setStep3State({ status: 'idle' });
@@ -1119,7 +1198,7 @@ export default function Home() {
       setStep7State({ status: 'idle' });
       // Clear analysis data tied to old script
       setPodcastSrt(''); setPodcastTimings(null); setPodcastDiagnostics(null);
-      setMusicSrt(''); setMusicTimings(null); setMusicDiagnostics(null);
+      setMusicSrt(''); setMusicTimings(null); setMusicVisualCueTimings(null); setMusicDiagnostics(null);
       // Note: podcastBlob / podcastPptxBlob / musicBlob / musicPptxBlob are intentionally kept
       // — already-generated audio and PPTX assets remain valid and downloadable
     }
@@ -1179,11 +1258,14 @@ export default function Home() {
     setMusicSrtOffset(0);
     setPodcastTimings(null);
     setMusicTimings(null);
+    setMusicVisualCueTimings(null);
     setScriptGeneratedAt(null);
     setLyricsGeneratedAt(null);
     setStep1State({ status: 'idle' }); setStep1LoadingMsg('正在解析 PDF 投影片...'); setStep2State({ status: 'idle' }); setStep3State({ status: 'idle' });
     setStep4State({ status: 'idle' }); setStep5State({ status: 'idle' });
     setStep6State({ status: 'idle' }); setStep7State({ status: 'idle' });
+    setIsEditingLyrics(false); setLyricsDraft('');
+    setLyricsContentSource('script');
     setPptxLoading(false); setRecordId('');
     resetPdfInput();
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1781,14 +1863,51 @@ export default function Home() {
 
         {/* ── Step 5 ── */}
         <div ref={step5Ref}>
-          <StepCard step={5} title="生成歌詞" state={step5State} disabled={!script || isEditingScript} dark={dark}>
+          <StepCard step={5} title="生成歌詞" state={step5State} disabled={(lyricsContentSource === 'slides' ? !slides : !script) || isEditingScript} dark={dark}>
+            <div className="mb-3">
+              <label className={labelCls}>歌詞內容依據</label>
+              <select
+                value={lyricsContentSource}
+                onChange={e => handleLyricsContentSourceChange(e.target.value as 'script' | 'slides')}
+                className={selectCls}
+                disabled={step5State.status === 'loading' || isEditingLyrics}
+              >
+                <option value="script">依講稿生成</option>
+                <option value="slides">依投影片生成</option>
+              </select>
+              <p className={`text-xs mt-1 ${t.muted}`}>
+                依講稿生成：歌詞會更貼近 Step 2 的敘事與鋪陳；依投影片生成：歌詞會更聚焦投影片重點。
+              </p>
+            </div>
             {step5State.status === 'loading'
               ? <LoadingBar message="正在生成歌詞..." dark={dark} />
-              : <ActionBtn onClick={handleGenerateLyrics}>{step5State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
+              : <ActionBtn onClick={handleGenerateLyrics} disabled={isEditingLyrics}>{step5State.status === 'done' ? '重新生成歌詞' : '生成歌詞'}</ActionBtn>}
             {lyrics && step5State.status === 'done' && (
               <div className="mt-3 space-y-2">
-                <TextBlock text={lyrics} dark={dark} />
-                <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, buildTaggedName('lyrics', getMusicTag(lyricsGeneratedAt), 'txt'))} dark={dark} />
+                {isEditingLyrics ? (
+                  <>
+                    <textarea
+                      value={lyricsDraft}
+                      onChange={e => setLyricsDraft(e.target.value)}
+                      className={`w-full h-64 rounded-xl border p-3 text-sm font-mono resize-y ${dark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-800'}`}
+                    />
+                    <p className={`text-xs ${dark ? 'text-amber-400' : 'text-amber-600'}`}>
+                      ⚠ 儲存後將清除歌曲音訊／對齊／簡報，需重新生成。請保留 [Slide N] 結構標記。
+                    </p>
+                    <div className="flex gap-2">
+                      <ActionBtn onClick={handleSaveLyricsEdit}>儲存修改</ActionBtn>
+                      <ActionBtn onClick={handleCancelLyricsEdit}>取消</ActionBtn>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <TextBlock text={lyrics} dark={dark} />
+                    <div className="flex gap-2 flex-wrap">
+                      <DownloadChip label="lyrics.txt" onClick={() => downloadText(lyrics, buildTaggedName('lyrics', getMusicTag(lyricsGeneratedAt), 'txt'))} dark={dark} />
+                      <ActionBtn onClick={handleStartLyricsEdit}>編輯歌詞</ActionBtn>
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {step5State.error && <p className={errBox}>{step5State.error}</p>}
@@ -1797,7 +1916,7 @@ export default function Home() {
 
         {/* ── Step 6 ── */}
         <div ref={step6Ref}>
-          <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics || isEditingScript} dark={dark}>
+          <StepCard step={6} title="生成歌曲音訊" state={step6State} disabled={!lyrics || isEditingScript || isEditingLyrics} dark={dark}>
             <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
               {[
                 { id: 'api' as const, title: 'API 生成', desc: '使用目前的歌曲生成流程' },
@@ -1887,7 +2006,7 @@ export default function Home() {
 
         {/* ── Step 7 ── */}
         <div ref={step7Ref}>
-          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob || isEditingScript} dark={dark}>
+          <StepCard step={7} title="生成歌曲簡報 (AI 精準對齊)" state={step7State} disabled={!musicBlob || isEditingScript || isEditingLyrics} dark={dark}>
             {step7State.status === 'loading'
               ? <LoadingBar message="AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）..." dark={dark} />
               : <ActionBtn onClick={handleGenerateMusicPptx}>{step7State.status === 'done' ? '重新生成歌曲簡報' : '生成歌曲簡報'}</ActionBtn>}

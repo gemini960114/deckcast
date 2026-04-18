@@ -2,6 +2,23 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v19 補充亮點（2026-04-18，plan_B cueIndex 架構 + plan_A 歌詞編修統一化）：
+1. **`cueIndex` 段落定址契約**：歌曲對齊鏈全面改用 `cueIndex`（1..N 段落序號）取代 `slideIndex` 作為 Phase 2 定址 key；`slideIndex` 保留為資訊欄位，允許重複與回溯（多個段落可對應同一張投影片）。
+2. **`[No Slide]` 移除**：歌詞視覺標記規則改為每個段落必須輸出 `[Slide N]`；`LyricVisualTag` 型別簡化為純 `{ kind: 'slide'; slideIndex: number }`，移除 `no-slide` union 分支。提供 fallback 規則：第一段無法判斷時用 `[Slide 1]`，中途不確定時延續前一段。
+3. **`parseLyricSections()` / `buildVisualCueTimings()` 新函式**（`lib/timing.ts`）：section-based 解析與時間計算；`buildMusicFallbackTimingsByLyricsWeight()` 修正為接收原始 `lyrics`（而非 strip 後的 `structuredLyrics`），解決 section 標題消失導致 fallback 退化為等分的 bug。
+4. **`buildVisualCueSummary()` / `parseVisualCueMatchesJSON()`**（`app/api/align-music/route.ts`）：取代 `buildSlideAnchorSummary` / `parseTransitionMatchesJSON`；前者輸出含 cueIndex 的段落摘要供 Phase 2 定址，後者驗證 cueIndex 範圍並排序。
+5. **舊版 PPTX/MP4 相容**：route 推導 `legacyMatches`（每個 slideIndex 首次出現的 cue），用於現有 `SlideTimings` 路徑；全段落序列另存為 `visualCueTimings` 供未來 B-3 渲染使用。
+6. **`handleSaveScriptEdit()` 統一化**（plan_A）：所有模式（`duo` / `solo_*`）儲存 script 後均清除 lyrics + Music 鏈，移除舊版「solo 不清 lyrics」分支；Step 5 同步新增 `isEditingLyrics` / `lyricsDraft` 雙軌歌詞後製編修，行為與 Step 2 對稱。
+
+### ✨ v16 補充亮點（2026-04-17，plan_P 後製編修 Podcast 文稿方法功能）：
+1. **Step 2 定位升級為「生成 + 後製編修」**：Podcast 文稿不再只是一次性 LLM 輸出，而是使用者可於 Step 2 直接進行後製潤稿、刪改句子、補強轉場、修正人名術語後，再作為 Step 3 / 4 的唯一正式上游。
+2. **採用 draft / live script 雙軌模型**：編輯期間只改 `scriptDraft`，未儲存前不覆寫正式 `script`；可避免使用者一邊改稿、一邊誤觸後續音訊或對齊流程而造成資料競態。
+3. **儲存後必須清除所有失效衍生物**：凡是依賴文稿內容的產物都視為 cache，包括 Podcast 音訊、SRT、timings、diagnostics、PPTX、MP4；`duo` 模式下連 lyrics / music 鏈也必須一併清空，因歌詞內容可能直接受文稿語氣影響。
+4. **提供「後製再生成」主流程**：使用者操作順序為 `生成文稿 → 編輯文稿 → 儲存修改 → 重新生成 Podcast 音訊 → 重新 AI 對齊 → 重新下載 script / srt / pptx / mp4`；所有下載內容必須以最新儲存版本為準。
+5. **IndexedDB 要保存編修後正式版本**：`updateRecord()` 在儲存文稿修改時同步寫回 `script` 與 `scriptGeneratedAt`，讓歷史紀錄、重新載入、下載命名時間標籤都指向最新人工編修版本，而非舊的 LLM 首次生成版本。
+6. **UI 需明確提示影響範圍**：Step 2 編輯區應告知「儲存後會清除既有 Podcast 音訊 / 對齊 / 簡報，需重新生成」，降低使用者對資料被重設的意外感。
+7. **未來可擴充為三段式能力**：`重新生成`（全部改寫）、`局部潤稿`（AI 針對選段改寫）、`手動編修`（textarea 直接改）；本期先以最穩定的手動編修為主，不引入選段 diff merge 複雜度。
+
 ### ✨ v15 補充亮點（2026-04-17，plan_D 生成後可手動編輯腳本）：
 1. **`isEditingScript` / `scriptDraft` state**（`app/page.tsx`）：新增兩個 state 管理腳本編輯模式；`scriptDraft` 為暫存草稿，不影響 live `script`，取消時零成本清除。
 2. **三個 handler**（`app/page.tsx`）：`handleStartScriptEdit()`（複製 script → draft，進入編輯）/ `handleCancelScriptEdit()`（清空 draft，不動正式腳本）/ `handleSaveScriptEdit()`（draft 寫回 script，清失效下游，更新 `scriptGeneratedAt`，同步 IndexedDB）。
@@ -67,7 +84,7 @@
 2. **Lyria 3 API 解析防呆與模型簡化**：徹底移除了 `30-second` 預設模型，目前全盤統一傳遞給 Lyria 3 Pro 模型。後端解析 response 時採用了「無序物件遍歷」，確保無論 Google API 的 `text` 或 `audio/mp3` 在 `parts` 陣列中的哪個位置全都能安全讀取。
 3. **機器解析優先的歌詞格式**：歌詞 prompt 已改為要求 `[段落名稱] [Slide N]`、禁止 AI 自行輸出時間軸、禁止用 `()` / `{}` 寫不可唱提示，並配合新的 slide anchor 摘要產生器。
 4. **登入與歷史紀錄隔離**：新增 invitation code + Google OAuth 雙重驗證、`AUTH_ENABLED` 開關、HMAC session token；當 `AUTH_ENABLED=true` 時，IndexedDB 歷史紀錄會依 Google email (`ownerEmail`) 隔離。
-5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-15 張**；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
+5. **簡報收尾、頁數與模型設定補強**：PDF 上傳範圍為 **3-25 張**（後擴充，原 3-15）；Podcast 與 Music 都支援 API 生成與外部上傳兩條路徑；Step 0 已新增模型下拉選單；PPTX 最後一頁不再是 0 秒，而是「原本應有時間 + 2 秒」。
 
 ### ✨ v07 補充亮點（2026-04-11）：
 1. **資料一致性修正（PPTX / MP4 / SRT / timing 同步）**：`handleRepackPodcastPptx()` / `handleRepackMusicPptx()` 套用偏移後，不只更新 PPTX，還會同步將 offset 烘入 `podcastSrt` / `musicSrt`（使用 `adjustSrtTimes`），更新 `podcastTimings` / `musicTimings` state，清零 offset slider，清除 video blob 快取；IndexedDB 同步寫入 timings 與 SRT；確保 PPTX、MP4、SRT 下載三者永遠一致。
@@ -1866,3 +1883,23 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
 - 雙人模式顯示 Speaker 2 描述欄位與 Voice 2 選擇；單人模式隱藏
 - Step 2 / 3 / 4 標題與 loading 訊息依模式動態調整
 - `GenerationRecord` 新增 `narrationMode?: NarrationMode` 欄位，隨專案存入 IndexedDB
+
+
+## v18 — Step 5 歌詞內容依據選擇
+
+- Step 5 新增「歌詞內容依據」下拉選單
+- 預設使用 `script`（依講稿生成），可切換為 `slides`（依投影片生成）
+- `lyricsContentSource` 寫入 `GenerationRecord`
+- 切換歌詞內容依據時，既有 `lyrics` 與 Music 鏈下游一律失效並清除
+- `duo / solo_*` 三種模式均可使用兩種來源，不再綁定模式
+
+## v17 — Step 5 歌詞手動後製編修
+
+- Step 5 升級為「生成 + 後製編修」模式，與 Step 2 文稿編修對稱
+- 新增 `isEditingLyrics` / `lyricsDraft` 雙軌（draft 不持久化）
+- 新增三個 handler：`handleStartLyricsEdit` / `handleCancelLyricsEdit` / `handleSaveLyricsEdit`
+- 歌詞儲存後清除 Music 鏈（musicBlob / SRT / timings / PPTX / MP4）
+- `lyricsGeneratedAt` 在手動儲存時同步更新
+- 編輯期間 Step 6 / 7 disabled
+- 所有模式（duo / solo_*）統一以 `script` 作為歌詞生成來源，移除 `lyricsSource = slides` 路徑
+- `handleSaveScriptEdit` 擴展：所有模式儲存 script 後都清 lyrics / Music 鏈（原本只有 duo）

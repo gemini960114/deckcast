@@ -29,6 +29,32 @@ export interface MusicTransitionMatch {
   matchReason?: string;
 }
 
+export type LyricVisualTag = { kind: 'slide'; slideIndex: number };
+
+export interface LyricSection {
+  sectionIndex: number;
+  sectionLabel: string;
+  visualTag: LyricVisualTag;
+  rawHeader: string;
+  lines: string[];
+}
+
+export interface VisualCueMatch {
+  cueIndex: number;
+  slideIndex: number | null;
+  startSrtId: number | null;
+  confidence?: number;
+  matchReason?: string;
+}
+
+export interface VisualCueTiming {
+  cueIndex: number;
+  slideIndex: number | null;
+  startSec: number;
+  endSec: number;
+  durationSec: number;
+}
+
 export interface AlignMusicDiagnostics {
   phase1Success: boolean;
   asrMode: 'whisper+gemini' | 'gemini-only';
@@ -71,6 +97,7 @@ export interface GenerationRecord {
   voice2?: string;
   styleId?: number;
   lyricsDuration?: string;
+  lyricsContentSource?: 'script' | 'slides';
   musicStyle: string;
   // Content
   slides?: string;

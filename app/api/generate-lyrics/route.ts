@@ -12,7 +12,7 @@ export async function POST(req: NextRequest) {
   try {
     logUsage(getEmailFromRequest(req), 'generate-lyrics');
     const { script, lyricsSource, styleId, duration = DEFAULT_LYRICS_DURATION, textModel, contentLanguage } = await req.json();
-    // lyricsSource takes priority: solo modes pass slides text to avoid mode-script tone pollution
+    // lyricsSource: UI-selected source text (script or slides); falls back to script
     const content = (lyricsSource ?? script) as string;
     const styleLabel = MUSIC_STYLES.find((s) => s.id === styleId)?.label ?? MUSIC_STYLES[0].label;
     const stylePrompt = buildLyricsPrompt(styleLabel, duration, contentLanguage as ContentLanguage | undefined);

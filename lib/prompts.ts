@@ -63,36 +63,38 @@ export const GENERATE_PODCAST_SRT = `
 
 export const FIND_TRANSITIONS_PROMPT = `
 你將收到兩份資料：
-[資料 A] 投影片錨點摘要 JSON 陣列。每個物件都包含：
-- slideIndex
+[資料 A] 視覺段落摘要 JSON 陣列。每個物件都包含：
+- cueIndex（段落序號，從 1 開始）
+- sectionLabel（段落名稱，如 Intro、Verse 1、Chorus）
+- slideIndex（對應的投影片編號，每個段落都有對應的投影片）
 - previousLastLine
 - currentFirstLine
 - currentSecondLine
 - currentLastLine
 [資料 B] 已完成時間對齊的字幕 JSON 陣列，每條字幕都有 id / start / end / text
 
-【核心任務】：找出每張投影片應該從哪一條字幕開始顯示
+【核心任務】：找出每個視覺段落應該從哪一條字幕開始顯示
 
 【工作原則】
 1. 你的工作是做「文字對文字」與「上下文順序」匹配，不是估算秒數
 2. 若歌詞有重複副歌、相似句型、重複句尾，必須根據前後文順序判斷正確的那一次
 3. 優先同時參考：
-   - 上一頁最後一句
-   - 本頁第一句
-   - 本頁第二句
-4. currentFirstLine 與 currentSecondLine 是最重要的定錨文字；若兩者都為 null，代表此頁可能沒有可唱歌詞
-5. 若本頁對應純音樂間奏，且資料 B 找不到可靠字幕，startSrtId 可填 null
-6. slideIndex 應由小到大，startSrtId 也應盡量保持遞增
-7. 你只需要找出「每張投影片第一次進入時」對應的字幕 id，不要輸出秒數
-8. 不可修改 slideIndex，不可省略任何 slideIndex
+   - 上一段最後一句
+   - 本段第一句
+   - 本段第二句
+4. currentFirstLine 與 currentSecondLine 是最重要的定錨文字；若兩者都為 null，代表此段可能沒有可唱歌詞
+5. 若本段對應純音樂間奏，且資料 B 找不到可靠字幕，startSrtId 可填 null
+6. startSrtId 應盡量保持遞增（歌曲時間是單向前進的）
+7. 你只需要找出「每個段落開始時」對應的字幕 id，不要輸出秒數
+8. 不可修改 cueIndex，不可省略任何 cueIndex
 
 【輸出格式】
 1. 只能輸出合法 JSON 陣列，不可包含 markdown 或任何說明文字
 2. 每個物件格式：
-   { "slideIndex": 1, "startSrtId": 3, "confidence": 0.95, "matchReason": "根據本頁第一句與前後文匹配" }
+   { "cueIndex": 1, "slideIndex": 1, "startSrtId": 3, "confidence": 0.95, "matchReason": "根據本段第一句與前後文匹配" }
 3. confidence 範圍 0 到 1
 4. 若無法可靠對應，startSrtId 填 null，confidence 降低
-5. 請為每一張投影片都輸出一個物件，slideIndex 必須連續且完整
+5. 請為每一個視覺段落都輸出一個物件，cueIndex 必須連續且完整
 `.trim();
 
 export const REFINE_MUSIC_SRT_TEXT_PROMPT = `
@@ -417,8 +419,9 @@ export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
   `幫我創作一首 ${styleLabel} 風格的歌曲歌詞，總長度約 ${totalSec} 秒。
 
 【核心目標】
-- 歌詞內容必須依照投影片順序自然發展
 - 請優先確保格式穩定、可解析，其次才是文采變化
+- 歌詞段落與投影片的對應代表「內容主題」，不代表播放順序
+- 每個段落都必須有 [Slide N]，不允許留空或使用其他標記
 - 不要自行加入任何時間軸標記，例如 [0:00 - 0:10]
 
 【輸出格式要求】（這是系統運作的硬性規則，請絕對嚴格遵守）
@@ -437,11 +440,13 @@ export const LYRICS_PROMPT_TIMED = (styleLabel: string, totalSec: number) =>
 1. 每一個大段落的標題行，必須且只能使用以下格式：
 [段落名稱] [Slide N]
 
-2. 段落標題行中，除了「段落名稱」與「[Slide N]」之外，不可加入任何其他文字、符號、說明或時間資訊。
+2. 段落標題行中，除了「段落名稱」與 [Slide N] 之外，不可加入任何其他文字、符號、說明或時間資訊。
 
 3. 正確範例：
 [Intro] [Slide 1]
 [Verse 1] [Slide 2]
+[Chorus] [Slide 3]
+[Bridge] [Slide 3]
 [Chorus] [Slide 3]
 
 4. 錯誤範例：
@@ -450,12 +455,16 @@ Intro [Slide 1]
 [Verse 1][Slide 2]
 [Verse 1] (Slide 2)
 [Verse 1] [Slide 1,2]
+[Bridge] [No Slide]
 
 【Slide 標記規則】
-1. 每個段落標題只能對應一張投影片，因此只能出現一個 [Slide N]
-2. 每張投影片都必須至少被標記一次，不可漏掉任何投影片
-3. 同一張投影片可以對應多個段落，這是允許的
-4. 歌詞內容必須依照投影片順序發展，不可倒序跳躍
+1. 每個段落標題必須包含一個 [Slide N]，不允許省略或使用 [No Slide]
+2. [Slide N] 代表此段歌詞主要對應第 N 張投影片的內容，不代表播放順序
+3. 同一張投影片可以重複出現，副歌回唱時應重複使用相同的 [Slide N]
+4. 投影片編號可以回跳，也可以跳過某些頁面
+5. 若第一段無法判斷對應哪一張，預設使用 [Slide 1]
+6. 若中途某段無法判斷，沿用上一段的 [Slide N]
+7. 不必強制讓每張投影片都至少出現一次
 
 【不可唱提示規則】
 1. 所有「不會被唱出來的提示詞」都必須單獨寫在英文中括號內
@@ -492,9 +501,20 @@ Intro [Slide 1]
 第一句歌詞
 第二句歌詞
 
-[Verse 1] [Slide 2]
+[Verse 1] [Slide 1]
 第三句歌詞
 第四句歌詞
+
+[Chorus] [Slide 3]
+第五句歌詞
+第六句歌詞
+
+[Bridge] [Slide 3]
+第七句歌詞
+
+[Chorus] [Slide 3]
+第五句歌詞（重複副歌）
+第六句歌詞
 
 請嚴格依照上述格式輸出，不要加入任何額外說明、註解、Markdown 或時間軸標記。`;
 

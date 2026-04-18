@@ -11,9 +11,11 @@ import {
 import {
   buildMusicFallbackTimingsByLyricsWeight,
   buildSlideTimingsFromSrtIds,
+  buildVisualCueTimings,
   normalizeTimings,
+  parseLyricSections,
 } from '@/lib/timing';
-import type { AlignMusicDiagnostics, MusicTransitionMatch, SrtEntry } from '@/lib/types';
+import type { AlignMusicDiagnostics, LyricSection, MusicTransitionMatch, SrtEntry, VisualCueMatch, VisualCueTiming } from '@/lib/types';
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
 import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
@@ -62,7 +64,7 @@ function buildStructuredLyrics(rawLyrics: string): string {
     .join('\n');
 }
 
-function parseTransitionMatchesJSON(raw: string, slideCount: number, srtEntries: SrtEntry[]): MusicTransitionMatch[] {
+function parseVisualCueMatchesJSON(raw: string, sectionCount: number, srtEntries: SrtEntry[]): VisualCueMatch[] {
   const cleaned = raw
     .replace(/```json/gi, '')
     .replace(/```/g, '')
@@ -74,23 +76,26 @@ function parseTransitionMatchesJSON(raw: string, slideCount: number, srtEntries:
 
     const validIds = new Set(srtEntries.map(entry => entry.id));
     return parsed
-      .map((item): MusicTransitionMatch | null => {
-        const slideIndex = parseNumericValue(item?.slideIndex);
-        if (!Number.isFinite(slideIndex) || slideIndex < 1 || slideIndex > slideCount) return null;
+      .map((item): VisualCueMatch | null => {
+        const cueIndex = parseNumericValue(item?.cueIndex);
+        if (!Number.isFinite(cueIndex) || cueIndex < 1 || cueIndex > sectionCount) return null;
         const rawId = parseNumericValue(item?.startSrtId);
         const startSrtId = Number.isFinite(rawId) && validIds.has(Math.trunc(rawId)) ? Math.trunc(rawId) : null;
+        const rawSlideIndex = parseNumericValue(item?.slideIndex);
+        const slideIndex = Number.isFinite(rawSlideIndex) ? Math.trunc(rawSlideIndex) : null;
         const confidence = parseNumericValue(item?.confidence);
         return {
-          slideIndex: Math.trunc(slideIndex),
+          cueIndex: Math.trunc(cueIndex),
+          slideIndex,
           startSrtId,
           confidence: Number.isFinite(confidence) ? Math.max(0, Math.min(1, confidence)) : undefined,
           matchReason: typeof item?.matchReason === 'string' ? item.matchReason.trim() : undefined,
         };
       })
-      .filter((item): item is MusicTransitionMatch => item !== null)
-      .sort((a, b) => a.slideIndex - b.slideIndex);
+      .filter((item): item is VisualCueMatch => item !== null)
+      .sort((a, b) => a.cueIndex - b.cueIndex);
   } catch (e) {
-    console.warn('Failed to parse transition matches JSON:', e);
+    console.warn('Failed to parse visual cue matches JSON:', e);
     return [];
   }
 }
@@ -124,54 +129,23 @@ function parseCorrectedSrtTexts(raw: string, srtEntries: SrtEntry[]): SrtEntry[]
   }
 }
 
-function extractSlideCount(lyrics: string): number {
-  const matches = [...lyrics.matchAll(/\[Slide\s*(\d+)\]/gi)];
-  if (matches.length === 0) return 0;
-  return Math.max(...matches.map(match => Number(match[1]) || 0));
-}
-
-function buildSlideAnchorSummary(lyrics: string, slideCount: number): string {
-  const linesBySlide = new Map<number, string[]>();
-  for (let index = 1; index <= slideCount; index++) {
-    linesBySlide.set(index, []);
-  }
-
-  let currentSlideIndex: number | null = null;
-  for (const rawLine of lyrics.split('\n')) {
-    const trimmedLine = rawLine.trim();
-    if (!trimmedLine) continue;
-
-    const slideMatch = trimmedLine.match(/\[Slide\s*(\d+)\]/i);
-    if (slideMatch) {
-      const parsedIndex = Number(slideMatch[1]);
-      currentSlideIndex = Number.isFinite(parsedIndex) && parsedIndex >= 1 && parsedIndex <= slideCount
-        ? parsedIndex
-        : null;
-      continue;
-    }
-
-    if (currentSlideIndex === null) continue;
-
-    const cleanedLine = removeInlineTimingAndTags(trimmedLine, false);
-    if (!cleanedLine) continue;
-    linesBySlide.get(currentSlideIndex)?.push(cleanedLine);
-  }
-
+function buildVisualCueSummary(sections: LyricSection[]): string {
   let previousLastLine: string | null = null;
-  const sections = Array.from({ length: slideCount }, (_, index) => {
-    const contentLines = linesBySlide.get(index + 1) ?? [];
-    const section = {
-      slideIndex: index + 1,
+  const cues = sections.map(section => {
+    const lines = section.lines.filter(l => l.trim());
+    const cue = {
+      cueIndex: section.sectionIndex,
+      sectionLabel: section.sectionLabel,
+      slideIndex: section.visualTag.slideIndex,
       previousLastLine,
-      currentFirstLine: contentLines[0] ?? null,
-      currentSecondLine: contentLines[1] ?? null,
-      currentLastLine: contentLines.length > 0 ? contentLines[contentLines.length - 1] : null,
+      currentFirstLine: lines[0] ?? null,
+      currentSecondLine: lines[1] ?? null,
+      currentLastLine: lines.length > 0 ? lines[lines.length - 1] : null,
     };
-    previousLastLine = section.currentLastLine;
-    return section;
+    previousLastLine = cue.currentLastLine;
+    return cue;
   });
-
-  return JSON.stringify(sections, null, 2);
+  return JSON.stringify(cues, null, 2);
 }
 
 async function generateMusicSrtWithGemini(params: {
@@ -230,7 +204,10 @@ export async function POST(req: NextRequest) {
     const phase1ModelName = isGeminiModel(requestedPhase1Model) ? requestedPhase1Model : DEFAULT_STEP71_MODEL;
     const phase2ModelName = requestedPhase2Model;
     const structuredLyrics = buildStructuredLyrics(lyrics);
-    const slideCount = typeof rawSlideCount === 'number' && rawSlideCount > 0 ? rawSlideCount : extractSlideCount(structuredLyrics);
+    const lyricSections = parseLyricSections(lyrics);
+    const slideCount = typeof rawSlideCount === 'number' && rawSlideCount > 0
+      ? rawSlideCount
+      : Math.max(0, ...lyricSections.map(s => s.visualTag.kind === 'slide' ? s.visualTag.slideIndex : 0));
     const diagnostics: AlignMusicDiagnostics = {
       phase1Success: false,
       asrMode: isWhisperConfigured() ? 'whisper+gemini' : 'gemini-only',
@@ -322,35 +299,45 @@ export async function POST(req: NextRequest) {
 
     const srt = srtEntriesToText(srtEntries);
 
-    let matches: MusicTransitionMatch[] = [];
-    if (slideCount > 0 && srtEntries.length) {
+    let visualCueMatches: VisualCueMatch[] = [];
+    if (lyricSections.length > 0 && srtEntries.length) {
       try {
         const rawMatches = await generateText(req, {
           model: phase2ModelName,
           expectJson: true,
           prompt:
             `${FIND_TRANSITIONS_PROMPT}\n\n` +
-            `=== [資料 A] 投影片錨點摘要 JSON ===\n${buildSlideAnchorSummary(structuredLyrics, slideCount)}\n========================\n\n` +
+            `=== [資料 A] 視覺段落摘要 JSON ===\n${buildVisualCueSummary(lyricSections)}\n========================\n\n` +
             `=== [資料 B] 字幕 JSON 陣列 ===\n${JSON.stringify(srtEntries, null, 2)}\n========================`,
         });
-        matches = parseTransitionMatchesJSON(rawMatches, slideCount, srtEntries);
+        visualCueMatches = parseVisualCueMatchesJSON(rawMatches, lyricSections.length, srtEntries);
       } catch (phase2Err) {
         diagnostics.issues.push(`Phase 2 failed: ${String(phase2Err)}`);
         console.warn('Phase 2 transition matching failed:', phase2Err);
       }
     }
 
+    // Legacy SlideTimings: first-occurrence per slideIndex (for existing PPTX/MP4)
+    const legacyMatches: MusicTransitionMatch[] = [];
+    const seenSlides = new Set<number>();
+    for (const m of visualCueMatches) {
+      if (m.slideIndex !== null && !seenSlides.has(m.slideIndex)) {
+        seenSlides.add(m.slideIndex);
+        legacyMatches.push({ slideIndex: m.slideIndex, startSrtId: m.startSrtId, confidence: m.confidence, matchReason: m.matchReason });
+      }
+    }
+
     let timings = slideCount > 0 && totalDuration > 0
-      ? buildSlideTimingsFromSrtIds(matches, srtEntries, slideCount, totalDuration)
+      ? buildSlideTimingsFromSrtIds(legacyMatches, srtEntries, slideCount, totalDuration)
       : [];
 
-    if (matches.length > 0 && timings.length > 0 && totalDuration > 0) {
+    if (legacyMatches.length > 0 && timings.length > 0 && totalDuration > 0) {
       diagnostics.timingSource = 'srt-id';
       timings = normalizeTimings(timings, slideCount, totalDuration);
     } else if (slideCount > 0 && totalDuration > 0) {
       diagnostics.timingSource = 'lyrics-weight-fallback';
       diagnostics.issues.push('Phase 2 returned insufficient matches, using lyrics-weight fallback.');
-      timings = buildMusicFallbackTimingsByLyricsWeight(structuredLyrics, slideCount, totalDuration);
+      timings = buildMusicFallbackTimingsByLyricsWeight(lyrics, slideCount, totalDuration);
     }
 
     if (!timings.length && slideCount > 0 && totalDuration > 0) {
@@ -359,7 +346,11 @@ export async function POST(req: NextRequest) {
       timings = normalizeTimings([], slideCount, totalDuration);
     }
 
-    return NextResponse.json({ srt, srtEntries, matches, timings, diagnostics });
+    const visualCueTimings: VisualCueTiming[] = lyricSections.length > 0 && totalDuration > 0
+      ? buildVisualCueTimings(lyricSections, visualCueMatches, srtEntries, totalDuration)
+      : [];
+
+    return NextResponse.json({ srt, srtEntries, matches: visualCueMatches, timings, visualCueTimings, diagnostics });
   } catch (err: unknown) {
     if (err instanceof Error && (err.message === 'Missing API Key' || err.name === 'RequestAuthError')) {
       return unauthorizedResponse(err);
