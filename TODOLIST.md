@@ -626,3 +626,33 @@
 - [x] **標準化後 blob 設為 `podcastBlob`**（type: `audio/mpeg`）；`podcastSource` 維持 `'upload'`
 - [x] **Toast 區分**：`已完成標準化並上傳：{file.name}` vs `已上傳音訊：{file.name}`
 - [x] **`logUsage()` 接入**（後端）：`normalize-podcast-audio` 行為已記錄
+
+## 28. 2026-04-19 Plan A 完成項目（SRT 字幕文字可編輯 + MP4 字幕同步修正）
+
+### 28.1 `SrtReviewPanel` Prop 擴充與子元件化（`components/SrtReviewPanel.tsx`）
+- [x] **新增兩個可選 props**：`onEntryTextChange?: (id: number, text: string) => void` 與 `onEntryBlur?: () => void`；optional 確保既有呼叫不壞
+- [x] **`<span>{entry.text}</span>` 換為 `<AutoResizeTextarea>`**：使用者可直接點擊修改字幕文字，時間軸維持不可調整
+- [x] **新增 `AutoResizeTextarea` 子元件**：以 `useLayoutEffect([value])` 在 value 變更時重算 `scrollHeight`，避免 inline ref callback 每次 render 都觸發 `null → el` 的全域 reflow
+- [x] **`onClick stopPropagation`**：防止點字幕文字觸發外層 row 的 `seekTo`；`onFocus` 刻意不掛 `seekTo`，避免干擾目前播放進度
+- [x] **UI hint 補強**：面板標題下方新增 `text-[10px] leading-relaxed` 說明文字「✎ 字幕文字可直接點擊修改（時間軸不可調整）。編輯完成後點擊面板外會自動儲存，並清除舊的簡報／影片快取以便重新生成。」；Podcast / Music 兩個面板共用同一段說明
+
+### 28.2 `app/page.tsx` Handler 與 ref 同步
+- [x] **新增 `podcastSrtEntriesRef` / `musicSrtEntriesRef`**：`useRef<SrtEntry[]>([])`，供 `onBlur` 寫 IndexedDB 時讀到最新 entries（解 same-tick onChange → onBlur 的 stale closure）
+- [x] **`useEffect` 同步 ref**：`[podcastSrtEntries]` / `[musicSrtEntries]` 更新時同步 `ref.current`，涵蓋對齊重跑、loadRecord 等非 onChange 路徑
+- [x] **`handlePodcastSrtEntryChange(id, text)` / `handleMusicSrtEntryChange(id, text)`**：在 `setXxxSrtEntries(prev => ...)` 的 updater 內同步寫入 `ref.current = next`（同 tick 讀取保證最新），避免在 updater 內做 side-effect
+- [x] **`handlePodcastSrtBlur()` / `handleMusicSrtBlur()`**：清除 `xxxPptxBlob` / `xxxVideoBlob` state，讀 `ref.current` 呼叫 `updateRecord()` 同步寫入 IndexedDB；刻意不清 `xxxSrtConfirmed`（對齊確認狀態保留）
+
+### 28.3 MP4 / PPTX cache 失效 + `srtConfirmed` 保留
+- [x] **Blur 清 pptx / video blob**：state 與 IndexedDB 雙清，下一次生成時強制使用最新字幕文字
+- [x] **`srtConfirmed` 不重設**：使用者若已確認過 SRT 時間對齊，純改字不該強迫重新進入對齊確認流程，設計上明確保留
+
+### 28.4 VideoExportBlock 字幕來源修正（關鍵 bug fix）
+- [x] **`podcastSrtForDownload` / `musicSrtForDownload` 條件放寬**（`app/page.tsx`）：原本要求 `slideCues.length > 0`，現改為 `entries.length > 0`，確保純 SRT 編輯（未動 cue）也能重新序列化出最新字幕
+- [x] **新增 `stripSlideTags()` helper**：以 regex `^(\d+)\s+\[slide-\d+\]` 移除 `1 [slide-0]` 格式的標記，回復為符合 SRT 規格的 `1`，避免 FFmpeg libass 解析失敗
+- [x] **新增 `podcastSrtForBurn` / `musicSrtForBurn`**：`adjustSrtTimes(stripSlideTags(forDownload), srtOffset)` 依序套用 tag 移除與 offset 調整；兩個 `VideoExportBlock` 的 `srtText` prop 改傳 `forBurn` 變體
+- [x] **修正症狀**：使用者編輯字幕後匯出 MP4，字幕實際燒入的是原始對齊版本 → 改用 `forBurn` 變體後正確燒入編輯後的最新字幕
+
+### 28.5 文件與型別維持不變（明確不動範圍）
+- [x] **`lib/types.ts` 未改**：`SlideTiming` 本來就無 `text` 欄位，純文字編輯不需改型別
+- [x] **`lib/db.ts` 未改**：`updateRecord()` 既有 spread 行為即可正確寫入 `undefined` 清除欄位
+- [x] **對齊 / 封裝邏輯未改**：Plan A 僅新增字幕文字編輯通道，不影響時間軸計算與 cue 解析

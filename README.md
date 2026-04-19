@@ -126,6 +126,7 @@
 - **歌曲對齊核心設計**：Phase 1 採「lyrics-as-anchor」策略，歌詞文字是唯一正確來源，音訊只負責定位時間。
 - **Podcast 對齊核心設計**：以實際音訊為主、腳本為輔，先修正逐段字幕文字，再對應每張投影片開始的字幕 id。
 - **SRT 優先（SRT-first）人工確認流程**：對齊完成後，Step 4 / Step 7 下方會出現兩階段確認面板——先確認 SRT 字幕內容（`SrtReviewPanel`），再透過 `SrtCueEditor` 手動指定每張投影片的換頁起始字幕列（也可略過，使用 AI 自動對齊結果）；確認後才解鎖「生成 PPTX」按鈕。
+- **SRT 字幕文字可直接點擊修改**：在 `SrtReviewPanel` 中，每一列字幕文字均可直接點擊進入 `<textarea>` 編輯（時間軸不可調整）；離開面板（blur）時自動儲存至 IndexedDB，同時清除下游 PPTX / MP4 快取以確保下次生成會使用最新文字；已確認的對齊狀態（`srtConfirmed`）刻意保留不重設。MP4 燒入字幕時的來源亦使用最新編輯版本（`podcastSrtForBurn` / `musicSrtForBurn`，已自動剝除 `[slide-N]` 標記以符合 FFmpeg libass 規格）。
 - **換頁標記縮圖預覽**：在 `SrtCueEditor` 點擊 slide chip 後，下方會即時顯示對應投影片縮圖（16:9，140×79px），方便確認畫面與字幕對應關係；縮圖延遲渲染（首次點擊才觸發），後續切換不重跑。
 - **PPTX / MP4 幀順序跟隨 cue 標記**：PPTX 與 MP4 的幀數均等於 SRT `[slide-N]` 標籤數（cue 數），而非 PDF 頁數；投影片順序依使用者 cue 的 `slideIndex` 重排，支援重複出現或以非 PDF 頁序呈現（`buildOrderedImagesFromTimings()`）。
 - 若 AI 配對失敗或不足，系統仍會退回 `lyrics/script weight fallback` 或均分 fallback，避免流程中斷。

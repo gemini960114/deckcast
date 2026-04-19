@@ -366,6 +366,10 @@ export default function Home() {
   const [musicVisualCueTimings, setMusicVisualCueTimings] = useState<VisualCueTiming[] | null>(null);
   const [podcastSrtEntries, setPodcastSrtEntries] = useState<SrtEntry[]>([]);
   const [musicSrtEntries, setMusicSrtEntries] = useState<SrtEntry[]>([]);
+  const podcastSrtEntriesRef = useRef<SrtEntry[]>([]);
+  const musicSrtEntriesRef = useRef<SrtEntry[]>([]);
+  useEffect(() => { podcastSrtEntriesRef.current = podcastSrtEntries; }, [podcastSrtEntries]);
+  useEffect(() => { musicSrtEntriesRef.current = musicSrtEntries; }, [musicSrtEntries]);
   const [podcastSlideCues, setPodcastSlideCues] = useState<SrtSlideCue[]>([]);
   const [musicSlideCues, setMusicSlideCues] = useState<SrtSlideCue[]>([]);
   const [podcastSrtConfirmed, setPodcastSrtConfirmed] = useState(false);
@@ -412,12 +416,16 @@ export default function Home() {
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
 
-  const podcastSrtForDownload = podcastSlideCues.length > 0 && podcastSrtEntries.length > 0
+  const podcastSrtForDownload = podcastSrtEntries.length > 0
     ? serializeSrtWithSlideTags(podcastSrtEntries, podcastSlideCues)
     : podcastSrt;
-  const musicSrtForDownload = musicSlideCues.length > 0 && musicSrtEntries.length > 0
+  const musicSrtForDownload = musicSrtEntries.length > 0
     ? serializeSrtWithSlideTags(musicSrtEntries, musicSlideCues)
     : musicSrt;
+  // For video burn-in: strip [slide-N] tag (not valid SRT spec) and apply offset
+  const stripSlideTags = (srt: string) => srt.replace(/^(\d+)\s+\[slide-\d+\]/gim, '$1');
+  const podcastSrtForBurn = adjustSrtTimes(stripSlideTags(podcastSrtForDownload), podcastSrtOffset);
+  const musicSrtForBurn = adjustSrtTimes(stripSlideTags(musicSrtForDownload), musicSrtOffset);
   const isDuo = narrationMode === 'duo';
   const textModelOptions = localLlmEnabled
     ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
@@ -1399,6 +1407,46 @@ export default function Home() {
     }
   }
 
+  function handlePodcastSrtEntryChange(id: number, text: string) {
+    setPodcastSrtEntries(prev => {
+      const next = prev.map(e => e.id === id ? { ...e, text } : e);
+      podcastSrtEntriesRef.current = next;
+      return next;
+    });
+  }
+
+  function handlePodcastSrtBlur() {
+    setPodcastPptxBlob(null);
+    setPodcastVideoBlob(null);
+    if (recordId) {
+      void updateRecord(recordId, {
+        podcastSrtEntries: podcastSrtEntriesRef.current,
+        podcastPptxBlob: undefined,
+        podcastVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
+  function handleMusicSrtEntryChange(id: number, text: string) {
+    setMusicSrtEntries(prev => {
+      const next = prev.map(e => e.id === id ? { ...e, text } : e);
+      musicSrtEntriesRef.current = next;
+      return next;
+    });
+  }
+
+  function handleMusicSrtBlur() {
+    setMusicPptxBlob(null);
+    setMusicVideoBlob(null);
+    if (recordId) {
+      void updateRecord(recordId, {
+        musicSrtEntries: musicSrtEntriesRef.current,
+        musicPptxBlob: undefined,
+        musicVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
   function loadRecord(rec: GenerationRecord) {
     setContentLanguage(rec.contentLanguage ?? DEFAULT_CONTENT_LANGUAGE);
     setNarrationMode(rec.narrationMode ?? 'duo');
@@ -1740,8 +1788,8 @@ export default function Home() {
             <div>
               <label className={labelCls}>Step 2 / 4.2 / 5 / 7.2 模型</label>
               <select value={textModel} onChange={e => setTextModel(e.target.value)} className={selectCls}>
-                  {textModelOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
-                </select>
+                {textModelOptions.map(option => <option key={option.id} value={option.id}>{option.label}</option>)}
+              </select>
             </div>
             <div>
               <label className={labelCls}>Step 3 模型</label>
@@ -1828,7 +1876,7 @@ export default function Home() {
                       className={`rounded-xl px-3 py-2 text-center transition-all border text-xs font-bold ${active
                         ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
                         : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                        } disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                       {label}
                     </button>
@@ -1848,60 +1896,60 @@ export default function Home() {
                 </div>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>
-                  {isDuo ? 'Speaker 1' : narrationMode === 'solo_explainer' ? '講者' : '敘事者'}
-                </label>
-                <input
-                  type="text" value={speaker1} onChange={e => setSpeaker1(e.target.value)}
-                  placeholder={isDuo ? '阿哲' : narrationMode === 'solo_explainer' ? '清晰的專業講者' : '有畫面感的故事敘述者'}
-                  disabled={step2State.status === 'loading' || isEditingScript}
-                  className={inputCls}
-                />
-              </div>
-              {isDuo && (
                 <div>
-                  <label className={labelCls}>Speaker 2</label>
-                  <input type="text" value={speaker2} onChange={e => setSpeaker2(e.target.value)} placeholder="Mary 老師"
+                  <label className={labelCls}>
+                    {isDuo ? 'Speaker 1' : narrationMode === 'solo_explainer' ? '講者' : '敘事者'}
+                  </label>
+                  <input
+                    type="text" value={speaker1} onChange={e => setSpeaker1(e.target.value)}
+                    placeholder={isDuo ? '阿哲' : narrationMode === 'solo_explainer' ? '清晰的專業講者' : '有畫面感的故事敘述者'}
+                    disabled={step2State.status === 'loading' || isEditingScript}
+                    className={inputCls}
+                  />
+                </div>
+                {isDuo && (
+                  <div>
+                    <label className={labelCls}>Speaker 2</label>
+                    <input type="text" value={speaker2} onChange={e => setSpeaker2(e.target.value)} placeholder="Mary 老師"
+                      disabled={step2State.status === 'loading' || isEditingScript} className={inputCls} />
+                  </div>
+                )}
+                <div>
+                  <label className={labelCls}>
+                    {isDuo ? '對話形式' : narrationMode === 'solo_explainer' ? '講解形式' : '敘事形式'}
+                  </label>
+                  <input
+                    type="text" value={dialogueStyle} onChange={e => setDialogueStyle(e.target.value)}
+                    placeholder={isDuo ? '自然流暢的對話' : narrationMode === 'solo_explainer' ? '清楚、穩定、條理分明' : '流動、有畫面感'}
+                    disabled={step2State.status === 'loading' || isEditingScript}
+                    className={inputCls}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
+                  <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂"
                     disabled={step2State.status === 'loading' || isEditingScript} className={inputCls} />
                 </div>
-              )}
-              <div>
-                <label className={labelCls}>
-                  {isDuo ? '對話形式' : narrationMode === 'solo_explainer' ? '講解形式' : '敘事形式'}
-                </label>
-                <input
-                  type="text" value={dialogueStyle} onChange={e => setDialogueStyle(e.target.value)}
-                  placeholder={isDuo ? '自然流暢的對話' : narrationMode === 'solo_explainer' ? '清楚、穩定、條理分明' : '流動、有畫面感'}
-                  disabled={step2State.status === 'loading' || isEditingScript}
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
-                <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂"
-                  disabled={step2State.status === 'loading' || isEditingScript} className={inputCls} />
-              </div>
-              <div>
-                <label className={labelCls}>旁白長度</label>
-                <select value={narrationLengthPreset} onChange={e => handleNarrationLengthPresetChange(e.target.value as NarrationLengthPreset)}
-                  disabled={step2State.status === 'loading' || isEditingScript} className={selectCls}>
-                  {NARRATION_LENGTH_PRESETS.map(opt => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>長度補充說明（選填）</label>
-                <input
-                  type="text"
-                  value={narrationLengthNote}
-                  onChange={e => handleNarrationLengthNoteChange(e.target.value)}
-                  placeholder="例如：前言精簡、案例頁詳細、最後一頁收短一點"
-                  disabled={step2State.status === 'loading' || isEditingScript}
-                  className={inputCls}
-                />
-              </div>
+                <div>
+                  <label className={labelCls}>旁白長度</label>
+                  <select value={narrationLengthPreset} onChange={e => handleNarrationLengthPresetChange(e.target.value as NarrationLengthPreset)}
+                    disabled={step2State.status === 'loading' || isEditingScript} className={selectCls}>
+                    {NARRATION_LENGTH_PRESETS.map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>長度補充說明（選填）</label>
+                  <input
+                    type="text"
+                    value={narrationLengthNote}
+                    onChange={e => handleNarrationLengthNoteChange(e.target.value)}
+                    placeholder="例如：前言精簡、案例頁詳細、最後一頁收短一點"
+                    disabled={step2State.status === 'loading' || isEditingScript}
+                    className={inputCls}
+                  />
+                </div>
               </div>
             </div>
 
@@ -1995,14 +2043,14 @@ export default function Home() {
 
             {step3State.status === 'loading'
               ? <LoadingBar message={podcastInputMode === 'api'
-                  ? (ttsChunkingEnabled && script && (() => {
-                      const sp = estimateTtsDuration(script, narrationMode);
-                      const pause = Math.max(estimateChunkCount(script, TTS_CHUNK_CHARS) - 1, 0) * (CHUNK_GAP_MS / 1000);
-                      return sp + pause;
-                    })() >= TTS_WARN_SEC
-                      ? '正在分段生成 TTS 音訊，可能需要較久時間...'
-                      : isDuo ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在生成單人 TTS 音訊（約 30–60 秒）...')
-                  : '正在匯入音訊檔案...'} dark={dark} />
+                ? (ttsChunkingEnabled && script && (() => {
+                  const sp = estimateTtsDuration(script, narrationMode);
+                  const pause = Math.max(estimateChunkCount(script, TTS_CHUNK_CHARS) - 1, 0) * (CHUNK_GAP_MS / 1000);
+                  return sp + pause;
+                })() >= TTS_WARN_SEC
+                  ? '正在分段生成 TTS 音訊，可能需要較久時間...'
+                  : isDuo ? '正在生成雙人 TTS 音訊（約 30–60 秒）...' : '正在生成單人 TTS 音訊（約 30–60 秒）...')
+                : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
                 <div className="space-y-3">
                   <div className={`rounded-2xl border px-3 py-3 ${t.inner}`}>
@@ -2010,27 +2058,27 @@ export default function Home() {
                       Voice 設定只會套用在 API 生成模式；切換到上傳音訊時，這些選項不會使用。
                     </p>
                     <div className={`grid gap-3 ${isDuo ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <label className={labelCls.replace('mb-1', '')}>{isDuo ? 'Voice 1' : 'Voice'}</label>
-                        <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
-                      </div>
-                      <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
-                        {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
-                      </select>
-                    </div>
-                    {isDuo && (
                       <div>
                         <div className="flex items-center justify-between mb-1">
-                          <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
-                          <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                          <label className={labelCls.replace('mb-1', '')}>{isDuo ? 'Voice 1' : 'Voice'}</label>
+                          <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
                         </div>
-                        <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                        <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
                           {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
                         </select>
                       </div>
-                    )}
-                  </div>
+                      {isDuo && (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
+                            <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                          </div>
+                          <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                            {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
+                          </select>
+                        </div>
+                      )}
+                    </div>
                   </div>
                   {ttsChunkingEnabled && (
                     <div className="flex flex-wrap items-center gap-2">
@@ -2046,11 +2094,11 @@ export default function Home() {
                     if (!script) return null;
                     // estimateChunkCount is a UI approximation (total chars ÷ TTS_CHUNK_CHARS);
                     // actual backend chunk count may differ due to slide boundaries and fallback logic.
-                    const speechSec  = estimateTtsDuration(script, narrationMode);
+                    const speechSec = estimateTtsDuration(script, narrationMode);
                     const chunkCount = estimateChunkCount(script, TTS_CHUNK_CHARS);
-                    const pauseSec   = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
-                    const estSec     = speechSec + (ttsGenerationMode === 'chunked' ? pauseSec : 0);
-                    const estMin     = Math.ceil(estSec / 60);
+                    const pauseSec = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
+                    const estSec = speechSec + (ttsGenerationMode === 'chunked' ? pauseSec : 0);
+                    const estMin = Math.ceil(estSec / 60);
                     if (estSec >= TTS_LONG_SEC) {
                       return (
                         <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-amber-900/30 border-amber-700/60 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
@@ -2141,6 +2189,8 @@ export default function Home() {
                   onRealign={runAlignPodcast}
                   realigning={step4State.status === 'loading'}
                   dark={dark}
+                  onEntryTextChange={handlePodcastSrtEntryChange}
+                  onEntryBlur={handlePodcastSrtBlur}
                 />
                 {podcastSrtConfirmed && (
                   <>
@@ -2204,7 +2254,7 @@ export default function Home() {
             onClearCache={() => setPodcastVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
-            srtText={podcastSrt}
+            srtText={podcastSrtForBurn}
           />
         )}
 
@@ -2371,8 +2421,8 @@ export default function Home() {
             {step7State.status === 'loading'
               ? <LoadingBar message={musicSrtEntries.length === 0 ? 'AI 正在聆聽歌曲結構並標記轉場時間（可能需要 20-40 秒）...' : '正在封裝簡報...'} dark={dark} />
               : <ActionBtn onClick={handleGenerateMusicPptx}>
-                  {musicSrtEntries.length > 0 ? '重新執行 SRT 對齊' : '生成字幕與換頁標記'}
-                </ActionBtn>}
+                {musicSrtEntries.length > 0 ? '重新執行 SRT 對齊' : '生成字幕與換頁標記'}
+              </ActionBtn>}
             {musicSrtEntries.length > 0 && (
               <div className="mt-3 space-y-3">
                 <SrtReviewPanel
@@ -2383,6 +2433,8 @@ export default function Home() {
                   onRealign={runAlignMusic}
                   realigning={step7State.status === 'loading'}
                   dark={dark}
+                  onEntryTextChange={handleMusicSrtEntryChange}
+                  onEntryBlur={handleMusicSrtBlur}
                 />
                 {musicSrtConfirmed && (
                   <>
@@ -2446,7 +2498,7 @@ export default function Home() {
             onClearCache={() => setMusicVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
-            srtText={musicSrt}
+            srtText={musicSrtForBurn}
           />
         )}
 
@@ -2572,13 +2624,13 @@ export default function Home() {
                       {rec.podcastPptxBlob && <button onClick={() => downloadBlob(rec.podcastPptxBlob!, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓pptx</button>}
                       {rec.musicPptxBlob && <button onClick={() => downloadBlob(rec.musicPptxBlob!, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'pptx'))} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-emerald-400 bg-emerald-900/30 hover:bg-emerald-900/50' : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'}`}>↓music.pptx</button>}
                       {rec.podcastSrt && <button onClick={() => {
-                          const srt = rec.podcastSlideCues?.length && rec.podcastSrtEntries?.length ? serializeSrtWithSlideTags(rec.podcastSrtEntries, rec.podcastSlideCues) : rec.podcastSrt!;
-                          downloadText(srt, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'srt'));
-                        }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
+                        const srt = rec.podcastSlideCues?.length && rec.podcastSrtEntries?.length ? serializeSrtWithSlideTags(rec.podcastSrtEntries, rec.podcastSlideCues) : rec.podcastSrt!;
+                        downloadText(srt, buildTaggedName('podcast', getPodcastTag(rec.scriptGeneratedAt, rec.createdAt), 'srt'));
+                      }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓podcast.srt</button>}
                       {rec.musicSrt && <button onClick={() => {
-                          const srt = rec.musicSlideCues?.length && rec.musicSrtEntries?.length ? serializeSrtWithSlideTags(rec.musicSrtEntries, rec.musicSlideCues) : rec.musicSrt!;
-                          downloadText(srt, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'srt'));
-                        }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
+                        const srt = rec.musicSlideCues?.length && rec.musicSrtEntries?.length ? serializeSrtWithSlideTags(rec.musicSrtEntries, rec.musicSlideCues) : rec.musicSrt!;
+                        downloadText(srt, buildTaggedName('music', getMusicTag(rec.lyricsGeneratedAt, rec.createdAt), 'srt'));
+                      }} className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${dark ? 'text-amber-400 bg-amber-900/30 hover:bg-amber-900/50' : 'text-amber-700 bg-amber-50 hover:bg-amber-100'}`}>↓music.srt</button>}
                       <button onClick={() => { void deleteRecord(rec.id, normalizedOwnerEmail); void loadHistory(); }}
                         className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ml-auto ${dark ? 'text-red-400 bg-red-900/30 hover:bg-red-900/50' : 'text-red-500 bg-red-50 hover:bg-red-100'}`}>刪除</button>
                     </div>
@@ -2597,15 +2649,15 @@ export default function Home() {
         <div className="max-w-3xl mx-auto px-5 flex flex-col sm:flex-row items-center justify-between gap-2">
           <span className={`text-[11px] font-bold ${t.green}`} style={{ fontFamily: "'Plus Jakarta Sans', sans-serif" }}>DeckCast</span>
           <span className={`text-[11px] ${t.faint}`}>讓簡報開口說話 · AI 簡報語音生成器</span>
-			<span className={`text-[11px] ${t.faint}`}>
-			  Contact NCHC ·{" "}
-			  <a
-				href="mailto:0203126@niar.org.tw"
-				className={`underline transition-opacity hover:opacity-80 ${dark ? 'text-slate-300' : 'text-slate-600'}`}
-			  >
-				0203126@niar.org.tw
-			  </a>
-			</span>
+          <span className={`text-[11px] ${t.faint}`}>
+            Contact NCHC ·{" "}
+            <a
+              href="mailto:0203126@niar.org.tw"
+              className={`underline transition-opacity hover:opacity-80 ${dark ? 'text-slate-300' : 'text-slate-600'}`}
+            >
+              0203126@niar.org.tw
+            </a>
+          </span>
         </div>
       </footer>
     </div>

@@ -1,7 +1,37 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SrtEntry } from '@/lib/types';
+
+interface AutoResizeTextareaProps {
+  value: string;
+  onChange: (value: string) => void;
+  onBlur?: () => void;
+  className?: string;
+}
+
+function AutoResizeTextarea({ value, onChange, onBlur, className }: AutoResizeTextareaProps) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={onBlur}
+      onClick={(e) => e.stopPropagation()}
+      className={className}
+    />
+  );
+}
 
 interface SrtReviewPanelProps {
   audioBlob: Blob | null;
@@ -11,6 +41,8 @@ interface SrtReviewPanelProps {
   onRealign: () => void;
   realigning?: boolean;
   dark?: boolean;
+  onEntryTextChange?: (id: number, text: string) => void;
+  onEntryBlur?: () => void;
 }
 
 export default function SrtReviewPanel({
@@ -21,6 +53,8 @@ export default function SrtReviewPanel({
   onRealign,
   realigning = false,
   dark = false,
+  onEntryTextChange,
+  onEntryBlur,
 }: SrtReviewPanelProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -106,6 +140,10 @@ export default function SrtReviewPanel({
           </span>
         )}
       </div>
+      <p className={`text-[10px] leading-relaxed ${faint}`}>
+        <span className="mr-1">✎</span>
+        字幕文字可直接點擊修改（時間軸不可調整）。編輯完成後點擊面板外會自動儲存，並清除舊的簡報／影片快取以便重新生成。
+      </p>
 
       {audioUrl && (
         <audio
@@ -144,9 +182,16 @@ export default function SrtReviewPanel({
                 <span className={`text-[10px] font-mono shrink-0 mt-0.5 ${faint}`}>
                   {formatSec(entry.start)}
                 </span>
-                <span className={`text-[11px] leading-relaxed ${isActive ? (dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold') : (dark ? 'text-slate-200' : 'text-slate-800')}`}>
-                  {entry.text}
-                </span>
+                <AutoResizeTextarea
+                  value={entry.text}
+                  onChange={(text) => onEntryTextChange?.(entry.id, text)}
+                  onBlur={() => onEntryBlur?.()}
+                  className={`flex-1 w-full bg-transparent outline-none border-b border-transparent focus:border-amber-500/50 transition-all resize-none overflow-hidden leading-relaxed text-[11px] ${
+                    isActive
+                      ? dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold'
+                      : dark ? 'text-slate-200' : 'text-slate-800'
+                  }`}
+                />
               </div>
             );
           })

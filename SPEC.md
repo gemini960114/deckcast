@@ -2,6 +2,15 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v24 補充亮點（2026-04-19，Plan A SRT 文字編輯 + MP4 字幕同步修正）：
+1. **SRT 文字可編輯**（`components/SrtReviewPanel.tsx`）：`SrtReviewPanel` 新增 `onEntryTextChange?: (id: number, text: string) => void` 與 `onEntryBlur?: () => void` 兩個可選 prop；原本唯讀的 `<span>{entry.text}</span>` 改為可點擊的 `<AutoResizeTextarea>`；時間軸維持不可調整；標題下方補上 `text-[10px]` 提示文字說明點擊即可編輯、離開面板自動儲存並清空 PPTX / MP4 快取。
+2. **`AutoResizeTextarea` 子元件化**：以 `useLayoutEffect([value])` 在 value 變更時重算 `scrollHeight`；避免原本 inline ref callback 寫法每次 render 被 React 呼叫 `null → el`，造成整張 SRT 列表全域 reflow；點字幕 `stopPropagation` 防止觸發外層 row 的 `seekTo`；`onFocus` 刻意不掛 `seekTo`，避免干擾當前播放進度。
+3. **stale closure 修正（`app/page.tsx`）**：新增 `podcastSrtEntriesRef` / `musicSrtEntriesRef` 兩個 `useRef<SrtEntry[]>([])`；`handlePodcastSrtEntryChange` / `handleMusicSrtEntryChange` 在 `setXxxSrtEntries(prev => {...})` 的 updater 內同步寫 `ref.current = next`（同 tick 讀取保證最新）；`useEffect` 另在 `[xxxSrtEntries]` 更新時同步 ref，涵蓋對齊重跑 / loadRecord 等非 onChange 路徑；onBlur handler 讀 `ref.current` 呼叫 `updateRecord()` 寫 IndexedDB，不再受 stale closure 影響。
+4. **Blur 清快取、保留對齊確認**：`handlePodcastSrtBlur()` / `handleMusicSrtBlur()` 僅清 `xxxPptxBlob` / `xxxVideoBlob`（state + IndexedDB 雙清），刻意不動 `xxxSrtConfirmed`；使用者若已確認過時間對齊，純改字不該強迫重新進入對齊確認流程。
+5. **MP4 字幕燒入同步最新編輯（關鍵 bug fix）**（`app/page.tsx`）：原本 `VideoExportBlock` 的 `srtText` prop 直接傳入 `podcastSrt` / `musicSrt`（對齊後未經編輯的原始字串），使用者編輯字幕後匯出 MP4 仍燒入舊版字幕；修正為新增 `podcastSrtForBurn` / `musicSrtForBurn` 兩個 derived string：先以 `serializeSrtWithSlideTags(entries, cues)` 從最新 entries 重新序列化，再經 `stripSlideTags()`（regex `^(\d+)\s+\[slide-\d+\]` 移除 `1 [slide-0]` 非 SRT 規格標記，避免 FFmpeg libass 解析失敗），最後套 `adjustSrtTimes(offset)` 與下載 SRT 一致的偏移。
+6. **條件放寬**：`podcastSrtForDownload` / `musicSrtForDownload` 原本要求 `slideCues.length > 0` 才重序列化，改為 `entries.length > 0`；讓純字幕編輯（未動換頁 cue）也能重新輸出最新文字。
+7. **不動範圍**：`lib/types.ts` / `lib/db.ts` / 對齊邏輯 / 封裝邏輯均未改動；`SlideTiming` 本來就無 `text` 欄位，文字編輯不需觸動時間軸計算。
+
 ### ✨ v23 補充亮點（2026-04-19，Plan I 外部上傳音檔標準化 + Plan H seek/play 時序修正）：
 1. **外部上傳 Podcast 音檔條件式標準化（Plan I）**：上傳 wav / m4a / aac 時，前端自動將音檔 POST 至新 API `/api/normalize-podcast-audio`，由後端 FFmpeg 轉成標準 MP3（mono / 24000 Hz / 128 kbps）後回傳；mp3 來源不重編碼，直接使用原始檔；播放器、字幕確認、對齊三者均使用同一份標準化後 blob，消除外部音檔格式差異造成的 seek 不穩定問題。
 2. **新增 `app/api/normalize-podcast-audio/route.ts`**：接收 `{ audioBase64, mimeType }`，呼叫系統 ffmpeg（Docker/Cloud Run 已內建，無需額外安裝），`finally` 區塊確保 tmp 暫存檔一定清除；轉檔失敗直接回 500 明確錯誤，不 silently fallback；`maxDuration=120` 防超時。
