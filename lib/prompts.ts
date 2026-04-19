@@ -1,4 +1,4 @@
-import { DEFAULT_SPEAKER2, CONTENT_LANGUAGE_PROMPT_LABEL, DEFAULT_CONTENT_LANGUAGE, NARRATION_LENGTH_PRESETS, DEFAULT_NARRATION_LENGTH_PRESET } from './constants';
+import { DEFAULT_SPEAKER2, CONTENT_LANGUAGE_PROMPT_LABEL, DEFAULT_CONTENT_LANGUAGE, NARRATION_LENGTH_PRESETS, DEFAULT_NARRATION_LENGTH_PRESET, ALLOWED_AUDIO_TAGS } from './constants';
 import type { NarrationMode, ContentLanguage, NarrationLengthPreset } from './types';
 
 export const GENERATE_MUSIC_SRT = `
@@ -237,6 +237,28 @@ Do not use English as the primary language for the sung lyrics.
 `;
 }
 
+function buildAudioTagsBlock(mode: NarrationMode): string {
+  const tagList = ALLOWED_AUDIO_TAGS.map(t => `[${t}]`).join('、');
+  const modeNote = mode === 'duo'
+    ? '每個 Speaker 輪次最多 1 個 tag，優先使用 [neutral]、[enthusiasm]、[curiosity]，避免過於戲劇化的非語言 tag。'
+    : mode === 'solo_story'
+    ? '可使用 [curiosity]、[tension]、[whispers]、[long pause] 以增加敘事感，但不要過量。'
+    : '偏保守，優先使用 [neutral]、[interest]、[curiosity]、[slow]、[short pause]。';
+
+  return `
+【Audio Tags 規則】
+- 本次腳本需在適當位置加入語氣標籤（audio tags）
+- 允許使用的 tags（僅限以下白名單）：${tagList}
+- 規則：
+  1. tags 必須放在 Speaker 台詞行內，不可放在「風格:」或「投影片 N:」行
+  2. 不可連續放兩個 tag，tag 與正文之間必須有文字或標點隔開
+  3. 每句最多 1 個 tag
+  4. 每張投影片最多 2 到 3 個 tag
+  5. 若內容不適合加 tag，寧可不加，不要硬插
+  6. ${modeNote}
+`;
+}
+
 export const DUO_PODCAST_PROMPT_TEMPLATE = (vars: {
   speaker1: string;
   speaker2: string;
@@ -375,10 +397,12 @@ export function buildNarrationPrompt(params: {
   language?: ContentLanguage;
   narrationLengthPreset?: NarrationLengthPreset;
   narrationLengthNote?: string;
+  audioTagsEnabled?: boolean;
 }): string {
   const language = params.language ?? DEFAULT_CONTENT_LANGUAGE;
   const resolvedPreset = params.narrationLengthPreset ?? DEFAULT_NARRATION_LENGTH_PRESET;
   const resolvedNote = params.narrationLengthNote ?? '';
+  const audioTagsSuffix = params.audioTagsEnabled ? buildAudioTagsBlock(params.mode) : '';
 
   switch (params.mode) {
     case 'duo':
@@ -390,7 +414,7 @@ export function buildNarrationPrompt(params: {
         language,
         narrationLengthPreset: resolvedPreset,
         narrationLengthNote: resolvedNote,
-      });
+      }) + audioTagsSuffix;
     case 'solo_explainer':
       return SOLO_EXPLAINER_PROMPT_TEMPLATE({
         speaker1: params.speaker1,
@@ -399,7 +423,7 @@ export function buildNarrationPrompt(params: {
         language,
         narrationLengthPreset: resolvedPreset,
         narrationLengthNote: resolvedNote,
-      });
+      }) + audioTagsSuffix;
     case 'solo_story':
       return SOLO_STORY_PROMPT_TEMPLATE({
         speaker1: params.speaker1,
@@ -408,7 +432,7 @@ export function buildNarrationPrompt(params: {
         language,
         narrationLengthPreset: resolvedPreset,
         narrationLengthNote: resolvedNote,
-      });
+      }) + audioTagsSuffix;
   }
 }
 

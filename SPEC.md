@@ -1956,6 +1956,18 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
 - `GenerationRecord` 新增 `narrationMode?: NarrationMode` 欄位，隨專案存入 IndexedDB
 
 
+## v19 — Step 2 Audio Tags 語氣標籤
+
+- Step 2 生成區新增「自動加入語氣標籤（Audio Tags）」checkbox（預設關閉，位於生成按鈕上方）
+- 勾選後，`buildNarrationPrompt()` 附加 `buildAudioTagsBlock(mode)` 規則 block，腳本自動插入少量白名單 tags
+- 白名單 12 個：`[neutral]` / `[enthusiasm]` / `[interest]` / `[curiosity]` / `[positive]` / `[tension]` / `[slow]` / `[fast]` / `[short pause]` / `[long pause]` / `[whispers]` / `[laughs]`（定義於 `lib/constants.ts` `ALLOWED_AUDIO_TAGS`）
+- Tags 規則：每句最多 1 個、每頁最多 2–3 個、不可連續相鄰、只能出現在 `Speaker` 台詞行；`solo_explainer` 偏保守、`solo_story` 可敘事性、`duo` 更保守
+- Step 3 `extractDialogue()` / `extractSoloScript()` 不清除行內 tags，TTS 直接接收帶 tags 腳本（驗證，不改碼）
+- Step 2「複製全文」`copyMode="speaker-only"` 僅過濾非 Speaker 行，tags 連同台詞一併保留（驗證，不改碼）
+- `audioTagsEnabled` 寫入 `GenerationRecord`：Step 1 上傳時存入初始值、Step 2 生成後 updateRecord、checkbox 切換時立即持久化
+- `handleNewProject()` 不重置此偏好（跨專案保留，設計與 `narrationLengthPreset` 一致）
+- 不綁定特定 TTS 模型：checkbox 一律顯示，推薦文案說明 `gemini-3.1-flash-tts-preview` 效果最佳
+
 ## v18 — Step 5 歌詞內容依據選擇
 
 - Step 5 新增「歌詞內容依據」下拉選單

@@ -109,6 +109,7 @@ export interface GenerationRecord {
   styleId?: number;
   lyricsDuration?: string;
   lyricsContentSource?: 'script' | 'slides';
+  audioTagsEnabled?: boolean;
   musicStyle: string;
   // Content
   slides?: string;

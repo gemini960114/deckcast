@@ -208,7 +208,15 @@ export function decodeApiKey(encoded: string): string {
   return xorWithSeed(atob(encoded), API_KEY_SEED);
 }
 
+// ===== Audio Tags =====
+export const ALLOWED_AUDIO_TAGS = [
+  'neutral', 'enthusiasm', 'interest', 'curiosity', 'positive', 'tension',
+  'slow', 'fast',
+  'short pause', 'long pause',
+  'whispers', 'laughs',
+] as const;
+
 // ===== Timing / Transition =====
-export const TRANSITION_COMPENSATION_SEC = 0.75;
+export const TRANSITION_COMPENSATION_SEC = 0.25;
 export const MIN_VISIBLE_SLIDE_SEC = 0.5;
 export const LAST_SLIDE_TAIL_SEC = 2.0;

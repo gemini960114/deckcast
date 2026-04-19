@@ -538,3 +538,35 @@
 ### 22.5 單元測試（D12-1）
 
 - [x] **新增 `__tests__/timing.test.ts`**（25 個測試）：覆蓋 `buildSlideCueEvents` / `buildTimingsFromSlideCueEvents` / `buildSlideCuesFromVisualCueMatches` / `buildSlideCuesFromTransitionMatches` / `normalizeTimings`；與現有 `__tests__/srt.test.ts`（7 個）合計 32 個測試全數通過（`npm test` via vitest）
+
+## 24. 2026-04-19 plan_F（Audio Tags 語氣標籤）
+
+### 24.1 型別與 Record（A）
+- [x] **`GenerationRecord` 新增 `audioTagsEnabled?: boolean`**（`lib/types.ts`）：隨專案存入 IndexedDB，重載後可還原 checkbox 狀態
+
+### 24.2 白名單常數（B）
+- [x] **新增 `ALLOWED_AUDIO_TAGS`**（`lib/constants.ts`）：第一版 12 個白名單 tags：`neutral / enthusiasm / interest / curiosity / positive / tension / slow / fast / short pause / long pause / whispers / laughs`
+
+### 24.3 Prompt 擴充（C）
+- [x] **新增 `buildAudioTagsBlock(mode)`**（`lib/prompts.ts`）：依 `duo / solo_explainer / solo_story` 模式產生對應保守程度的 audio tags 規則 block（使用頻率、允許 tags、連續禁止等）
+- [x] **`buildNarrationPrompt()` 新增 `audioTagsEnabled?` 參數**：僅在 `audioTagsEnabled === true` 時附加 tags block；未啟用時行為與現況完全一致
+
+### 24.4 generate-script route（D）
+- [x] **request body 解構加入 `audioTagsEnabled`**（`app/api/generate-script/route.ts`）：傳給 `buildNarrationPrompt()`；`false` 為隱性預設，不影響舊呼叫
+
+### 24.5 Step 2 UI（E）
+- [x] **Step 2 生成區新增 checkbox**（`app/page.tsx`）：`自動加入語氣標籤（Audio Tags）`，位於生成按鈕上方
+- [x] **靜態推薦提示**：「會在腳本中插入如 [enthusiasm]、[short pause] 等Audio Tags標籤，」，非阻擋式提示，不依 TTS 模型 gate
+
+### 24.6 前端 request / record 流（F）
+- [x] **`audioTagsEnabled` state**（`app/page.tsx`）：預設 `false`
+- [x] **`handleAudioTagsEnabledChange()`**：切換時立即呼叫 `updateRecord()`，與 `narrationLengthPreset` 行為一致
+- [x] **`handleGenerateScript()` payload** 加入 `audioTagsEnabled`
+- [x] **`updateRecord()` after Step 2** 加入 `audioTagsEnabled`
+- [x] **`saveRecord()` at Step 1** 加入 `audioTagsEnabled`（確保 PDF 上傳後 reload 即可還原）
+- [x] **`loadRecord()` 回填 `audioTagsEnabled`**：`rec.audioTagsEnabled ?? false`
+- [x] **`handleNewProject()` 不重置 `audioTagsEnabled`**：設計決策 — 屬於 Step 2 生成偏好，跨專案保留
+
+### 24.7 相容性驗證（G / H）
+- [x] **`copyMode="speaker-only"` 相容**（驗證，不改碼）：只過濾非 Speaker 行，行內 `[tag]` 不受影響
+- [x] **`extractDialogue()` / `extractSoloScript()` 相容**（驗證，不改碼）：兩函式均不清除行內 `[tag]`，Step 3 TTS 可直接接收帶 tags 腳本

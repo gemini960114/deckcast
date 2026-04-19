@@ -9,7 +9,7 @@ import type { NarrationMode, ContentLanguage, NarrationLengthPreset } from '@/li
 export async function POST(req: NextRequest) {
   try {
     logUsage(getEmailFromRequest(req), 'generate-script');
-    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo', contentLanguage, narrationLengthPreset, narrationLengthNote } = await req.json();
+    const { slides, speaker1, speaker2, dialogueStyle, tone, textModel, narrationMode = 'duo', contentLanguage, narrationLengthPreset, narrationLengthNote, audioTagsEnabled } = await req.json();
     const prompt = buildNarrationPrompt({
       mode: narrationMode as NarrationMode,
       speaker1,
@@ -19,6 +19,7 @@ export async function POST(req: NextRequest) {
       language: contentLanguage as ContentLanguage | undefined,
       narrationLengthPreset: narrationLengthPreset as NarrationLengthPreset | undefined,
       narrationLengthNote,
+      audioTagsEnabled: audioTagsEnabled === true,
     });
 
     const raw = await generateText(req, {

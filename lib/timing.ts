@@ -467,7 +467,7 @@ export function normalizeTimings(
  * 計算實際可用的轉場秒數（PPTX 與 MP4 共用）。
  *
  * 規則：
- *   - 目標是 transitionSec（0.75s）
+ *   - 目標是 transitionSec（0.25s）
  *   - 但不能讓頁面可見時間少於 minVisibleSec
  *   - 最小保底 0.1s（維持轉場視覺效果）
  *

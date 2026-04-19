@@ -229,13 +229,16 @@ function AudioPlayer({ blob, label, dark }: { blob: Blob; label: string; dark: b
 }
 
 // ── TextBlock ──
-function TextBlock({ text, dark }: { text: string; dark: boolean }) {
+function TextBlock({ text, dark, copyMode }: { text: string; dark: boolean; copyMode?: 'raw' | 'speaker-only' }) {
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const t = useTheme(dark);
 
   function handleCopy() {
-    void navigator.clipboard.writeText(text).then(() => {
+    const content = copyMode === 'speaker-only'
+      ? text.split('\n').map(l => l.trim()).filter(Boolean).filter(l => /^speaker\b/i.test(l)).join('\n')
+      : text;
+    void navigator.clipboard.writeText(content).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
@@ -331,6 +334,7 @@ export default function Home() {
   const [contentLanguage, setContentLanguage] = useState<ContentLanguage>(DEFAULT_CONTENT_LANGUAGE);
   const [narrationLengthPreset, setNarrationLengthPreset] = useState<NarrationLengthPreset>(DEFAULT_NARRATION_LENGTH_PRESET);
   const [narrationLengthNote, setNarrationLengthNote] = useState('');
+  const [audioTagsEnabled, setAudioTagsEnabled] = useState(false);
   const [multimodalModel, setMultimodalModel] = useState<string>(DEFAULT_MULTIMODAL_MODEL);
   const [textModel, setTextModel] = useState<string>(DEFAULT_TEXT_MODEL);
   const [localLlmEnabled, setLocalLlmEnabled] = useState(false);
@@ -813,6 +817,7 @@ export default function Home() {
         musicModel,
         styleId,
         lyricsDuration,
+        audioTagsEnabled,
         musicStyle: MUSIC_STYLES.find(s => s.id === styleId)?.label ?? '',
         slides: slidesResult,
         pdfBlob: file,
@@ -842,12 +847,13 @@ export default function Home() {
         contentLanguage,
         narrationLengthPreset,
         narrationLengthNote,
+        audioTagsEnabled,
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       const now = Date.now();
       setScript(data.script); setScriptGeneratedAt(now); setStep2State({ status: 'done' });
-      if (recordId) await updateRecord(recordId, { script: data.script, scriptGeneratedAt: now, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage, narrationLengthPreset, narrationLengthNote }, normalizedOwnerEmail);
+      if (recordId) await updateRecord(recordId, { script: data.script, scriptGeneratedAt: now, narrationMode, speaker1, speaker2, dialogueStyle, tone, textModel, contentLanguage, narrationLengthPreset, narrationLengthNote, audioTagsEnabled }, normalizedOwnerEmail);
       setTimeout(() => step3Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) { setStep2State({ status: 'error', error: String(e) }); setToast('文稿生成失敗：' + String(e)); }
   }
@@ -1373,6 +1379,7 @@ export default function Home() {
     setNarrationMode(rec.narrationMode ?? 'duo');
     setNarrationLengthPreset(rec.narrationLengthPreset ?? DEFAULT_NARRATION_LENGTH_PRESET);
     setNarrationLengthNote(rec.narrationLengthNote ?? '');
+    setAudioTagsEnabled(rec.audioTagsEnabled ?? false);
     if (rec.speaker1) setSpeaker1(rec.speaker1); else setSpeaker1(DEFAULT_SPEAKER1);
     if (rec.speaker2) setSpeaker2(rec.speaker2); else setSpeaker2(DEFAULT_SPEAKER2);
     if (rec.dialogueStyle) setDialogueStyle(rec.dialogueStyle); else setDialogueStyle(DEFAULT_DIALOGUE_STYLE);
@@ -1480,6 +1487,13 @@ export default function Home() {
         narrationLengthPreset,
         narrationLengthNote: value,
       }, normalizedOwnerEmail);
+    }
+  }
+
+  function handleAudioTagsEnabledChange(value: boolean) {
+    setAudioTagsEnabled(value);
+    if (recordId) {
+      void updateRecord(recordId, { audioTagsEnabled: value }, normalizedOwnerEmail);
     }
   }
 
@@ -1886,6 +1900,22 @@ export default function Home() {
         {/* ── Step 2 ── */}
         <div ref={step2Ref}>
           <StepCard step={2} title={isDuo ? '生成 Podcast 文稿' : narrationMode === 'solo_explainer' ? '生成講解腳本' : '生成敘事腳本'} state={step2State} disabled={!slides} dark={dark}>
+            <div className="mb-3">
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={audioTagsEnabled}
+                  onChange={e => handleAudioTagsEnabledChange(e.target.checked)}
+                  className="mt-0.5 accent-emerald-500"
+                />
+                <span className={`text-[10px] uppercase tracking-widest font-bold ${t.label}`}>
+                  自動加入語氣標籤（Audio Tags）
+                </span>
+              </label>
+              <p className={`mt-1 text-[10px] ${t.faint}`}>
+                會在腳本中插入如 [enthusiasm]、[short pause] 等Audio Tags標籤，
+              </p>
+            </div>
             {step2State.status === 'loading'
               ? <LoadingBar message={isDuo ? '正在生成雙人對話文稿...' : narrationMode === 'solo_explainer' ? '正在生成單人講解腳本...' : '正在生成單人敘事腳本...'} dark={dark} />
               : <ActionBtn onClick={handleGenerateScript}>{step2State.status === 'done' ? '重新生成文稿' : '生成文稿'}</ActionBtn>}
@@ -1907,7 +1937,7 @@ export default function Home() {
                   </>
                 ) : (
                   <>
-                    <TextBlock text={script} dark={dark} />
+                    <TextBlock text={script} dark={dark} copyMode="speaker-only" />
                     <div className="flex gap-2 flex-wrap">
                       <DownloadChip label="script.txt" onClick={() => downloadText(script, buildTaggedName('script', getPodcastTag(scriptGeneratedAt), 'txt'))} dark={dark} />
                       <ActionBtn onClick={handleStartScriptEdit}>編輯腳本</ActionBtn>
@@ -2091,8 +2121,8 @@ export default function Home() {
                       dark={dark}
                     />
                     <div className="space-y-2">
-                      <ActionBtn onClick={buildPodcastPptxFromConfirmedSrt}>
-                        {podcastPptxBlob ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報'}
+                      <ActionBtn onClick={buildPodcastPptxFromConfirmedSrt} disabled={step4State.status === 'loading'}>
+                        {step4State.status === 'loading' ? '正在生成 Podcast 簡報...' : (podcastPptxBlob ? '重新生成 Podcast 簡報' : '生成 Podcast 簡報')}
                       </ActionBtn>
                       {podcastPptxBlob && step4State.status === 'done' && (
                         <div className="space-y-2">
@@ -2319,8 +2349,8 @@ export default function Home() {
                       dark={dark}
                     />
                     <div className="space-y-2">
-                      <ActionBtn onClick={buildMusicPptxFromConfirmedSrt}>
-                        {musicPptxBlob ? '重新生成歌曲簡報' : '生成歌曲簡報'}
+                      <ActionBtn onClick={buildMusicPptxFromConfirmedSrt} disabled={step7State.status === 'loading'}>
+                        {step7State.status === 'loading' ? '正在生成歌曲簡報...' : (musicPptxBlob ? '重新生成歌曲簡報' : '生成歌曲簡報')}
                       </ActionBtn>
                       {musicPptxBlob && step7State.status === 'done' && (
                         <div className="space-y-2">

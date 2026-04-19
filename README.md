@@ -37,6 +37,13 @@
 - 每張投影片約 30–60 秒內容量，並依照模式與複雜度自然調整長度
 - 可自訂說話者角色（單人模式僅 Speaker 1）、對話形式與語氣風格
 - 切換模式時，文稿與後續歌詞／SRT／timings 會自動清除，避免舊模式內容殘留
+- **Audio Tags（語氣標籤）**：Step 2 生成區提供「自動加入語氣標籤（Audio Tags）」checkbox（預設關閉）
+  - 勾選後，重新生成的腳本會依模式自動插入少量白名單語氣 tags，如 `[enthusiasm]`、`[short pause]`
+  - 白名單（12 個）：`[neutral]` / `[enthusiasm]` / `[interest]` / `[curiosity]` / `[positive]` / `[tension]` / `[slow]` / `[fast]` / `[short pause]` / `[long pause]` / `[whispers]` / `[laughs]`
+  - Tags 只出現在 `Speaker` 台詞行，不影響 `風格:` 或 `投影片 N:` 等 parser 結構標記
+  - Step 3 TTS 與 Step 2「複製全文」均保留 tags 不清除
+  - 建議搭配 `gemini-3.1-flash-tts-preview` 使用；其他 TTS 模型亦可運作，效果未保證
+  - `audioTagsEnabled` 儲存於 `GenerationRecord`，重新載入歷史紀錄後可還原；切換後立即持久化
 - **生成後可手動編輯**：文稿生成完成後，Step 2 會顯示「編輯腳本」按鈕，可直接在前端修改文稿內容
   - 編輯期間使用暫存草稿（`scriptDraft`），取消不影響正式腳本
   - 儲存後會自動清除所有依賴腳本的下游產物（Podcast 音訊、PPTX、SRT、timings、video）；所有模式均同時清除歌詞與音樂系列成品（plan_A 後統一行為，不再區分 duo/solo）
