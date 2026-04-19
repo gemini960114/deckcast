@@ -2,6 +2,18 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v23 補充亮點（2026-04-19，Plan I 外部上傳音檔標準化 + Plan H seek/play 時序修正）：
+1. **外部上傳 Podcast 音檔條件式標準化（Plan I）**：上傳 wav / m4a / aac 時，前端自動將音檔 POST 至新 API `/api/normalize-podcast-audio`，由後端 FFmpeg 轉成標準 MP3（mono / 24000 Hz / 128 kbps）後回傳；mp3 來源不重編碼，直接使用原始檔；播放器、字幕確認、對齊三者均使用同一份標準化後 blob，消除外部音檔格式差異造成的 seek 不穩定問題。
+2. **新增 `app/api/normalize-podcast-audio/route.ts`**：接收 `{ audioBase64, mimeType }`，呼叫系統 ffmpeg（Docker/Cloud Run 已內建，無需額外安裝），`finally` 區塊確保 tmp 暫存檔一定清除；轉檔失敗直接回 500 明確錯誤，不 silently fallback；`maxDuration=120` 防超時。
+3. **`handlePodcastUpload()` 改版**（`app/page.tsx`）：加入 `isMp3File()` 判斷；非 mp3 時以 chunked base64 編碼（每次 8192 bytes，避免大檔 stack overflow）送出標準化請求；成功後 toast 顯示「已完成標準化並上傳」vs「已上傳音訊」區分兩條路徑；`podcastSource` 維持 `'upload'`，不影響後續對齊流程。
+4. **`SrtReviewPanel` seek/play race condition 修正（Plan H）**：新增 `pendingSeekRef` / `shouldAutoplayAfterSeekRef` 兩個 ref；`seekTo()` 不再立刻呼叫 `audio.play()`，而是記錄原本播放狀態後，等 `handleSeeked` 或 `handleCanPlay` 確認 seek 完成才觸發 play；暫停狀態下點字幕不會強制播放；`scrollIntoView` 改為 `instant`；所有 `play()` 加 `.catch(() => {})`；新增 debug console.log 方便驗證事件順序。
+
+### ✨ v22 補充亮點（2026-04-19，align-podcast duration 修正 + UI 設定遷移）：
+1. **align-podcast 時間軸修正（Plan G）**：前端 `runAlignPodcast()` 新增取得音訊實際 duration（`getAudioDuration()`），作為 `duration` 欄位傳入 align-podcast API；後端以 `clientDurationSafe` 為最高優先來源，依序 fallback 至 Whisper transcriptionDuration、Gemini SRT lastSrtEnd；safety floor `Math.max(totalDuration, lastSrtEnd)` 確保 SRT 最後一筆 end 不超出時間軸；`AlignPodcastDiagnostics` 新增 4 個欄位供診斷。
+2. **UI 設定欄位遷移**：歌曲風格/歌詞長度遷入 Step 5；Speaker Voice 1/2 遷入 Step 3 API 生成區；表達模式/Speaker/對話形式/語氣風格/旁白長度/長度補充說明遷入 Step 2；設定區保留內容語言作為全域選項。
+3. **TTS 估時係數修正**：`CHARS_PER_MIN` 調整為 1.5 倍（duo: 330 / solo_explainer: 345 / solo_story: 300），警示門檻同步調高（`TTS_WARN_SEC: 200` / `TTS_LONG_SEC: 320`）。
+4. **預設值調整**：`DEFAULT_SPEAKER1 = '阿哲'`；`DEFAULT_SPEAKER2 = 'Mary 老師'`；`DEFAULT_NARRATION_LENGTH_PRESET = 'brief'`；Step 3 上傳提示文字改為「建議至」並更新連結至 `gemini-2.5-pro-preview-tts`。
+
 ### ✨ v21 補充亮點（2026-04-19，燒入字幕功能 + cachedFilename 檔名流程）：
 1. **燒入字幕（Burn Subtitles）**：匯出 MP4 前可勾選「燒入字幕」，FFmpeg `subtitles=` filter 將 SRT 永久嵌入畫面；預設不勾選，仍可另行下載 `.srt`；勾選後下載檔名自動加 `.subbed` 後綴（`podcast.subbed.mp4` / `music.subbed.mp4`）。
 2. **`cachedFilename` prop + `onCached(blob, filename)` 簽名**（`components/VideoExportBlock.tsx`）：`onCached` 從 `(blob) => void` 改為 `(blob, filename) => void`，將燒入字幕時的實際檔名一路傳回 `page.tsx`；`cachedFilename` prop 確保「再次下載」與下載總覽均使用正確的 `.subbed.mp4` 或 `.mp4` 名稱。

@@ -139,7 +139,7 @@ export const CONTENT_LANGUAGE_PROMPT_LABEL: Record<ContentLanguage, string> = {
 };
 
 // ===== Narration Length =====
-export const DEFAULT_NARRATION_LENGTH_PRESET: NarrationLengthPreset = 'balanced';
+export const DEFAULT_NARRATION_LENGTH_PRESET: NarrationLengthPreset = 'brief';
 
 export const NARRATION_LENGTH_PRESETS: {
   value: NarrationLengthPreset;
@@ -152,8 +152,8 @@ export const NARRATION_LENGTH_PRESETS: {
 ];
 
 // ===== Default Settings =====
-export const DEFAULT_SPEAKER1 = '男生為節目主持人 阿哲';
-export const DEFAULT_SPEAKER2 = '女生為高師大的老師 Mary 老師（具教學經驗，說明清楚）';
+export const DEFAULT_SPEAKER1 = '阿哲';
+export const DEFAULT_SPEAKER2 = 'Mary 老師';
 export const DEFAULT_DIALOGUE_STYLE = '採自然流暢的對話形式，具有節目感與互動感';
 export const DEFAULT_TONE = '語氣親切、易懂，適合一般聽眾';
 export const DEFAULT_VOICE1 = 'Puck';
@@ -162,9 +162,9 @@ export const DEFAULT_STYLE_ID = 1;
 export const DEFAULT_LYRICS_DURATION = '105';
 
 // ===== TTS Chunking Thresholds =====
-export const TTS_WARN_SEC    = 150;  // 2.5 分鐘：顯示提示
-export const TTS_LONG_SEC    = 240;  // 4 分鐘：顯示長篇提示
-export const TTS_CHUNK_CHARS = 800;   // 後端每段台詞字數上限（≈ 3–4 分鐘）；實測校正值，視音質再微調
+export const TTS_WARN_SEC    = 200;  // 實際音訊 ~2.5 分鐘時觸發提示（estSec = 實際 × 1.33）
+export const TTS_LONG_SEC    = 320;  // 實際音訊 ~4 分鐘時觸發長篇警示（estSec = 實際 × 1.33）
+export const TTS_CHUNK_CHARS = 800;   // 後端每段台詞字數上限（330 chars/min 下 ≈ 2.4 分鐘）；實測校正值，視音質再微調
 export const CHUNK_GAP_MS    = 800;  // chunk 間插入的固定靜音（ms）
 
 // ===== Media Upload Rules =====

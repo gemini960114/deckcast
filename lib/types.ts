@@ -79,6 +79,10 @@ export interface AlignPodcastDiagnostics {
   asrMode: 'whisper+gemini' | 'gemini-only';
   srtSource: 'hybrid-whisper-gemini' | 'whisper' | 'gemini-only' | 'script-fallback' | 'none';
   timingSource: 'srt-id' | 'script-char-fallback' | 'equal-fallback';
+  clientDuration: number;
+  transcriptionDuration: number;
+  lastSrtEnd: number;
+  finalTotalDuration: number;
   issues: string[];
 }
 

@@ -28,6 +28,9 @@ export default function SrtReviewPanel({
   const [currentTime, setCurrentTime] = useState(0);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
 
+  const pendingSeekRef = useRef<number | null>(null);
+  const shouldAutoplayAfterSeekRef = useRef(false);
+
   useEffect(() => {
     if (!audioBlob) return;
     const url = URL.createObjectURL(audioBlob);
@@ -40,18 +43,53 @@ export default function SrtReviewPanel({
   useEffect(() => {
     const el = rowRefs.current[activeIndex];
     if (el && listRef.current) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el.scrollIntoView({ behavior: 'instant', block: 'nearest' });
     }
   }, [activeIndex]);
 
   function seekTo(start: number) {
-    if (audioRef.current) {
-      audioRef.current.currentTime = start;
-      void audioRef.current.play();
+    const audio = audioRef.current;
+    if (!audio) return;
+
+    pendingSeekRef.current = start;
+    shouldAutoplayAfterSeekRef.current = !audio.paused; // 保留原本播放狀態
+
+    setCurrentTime(start);     // 先更新 UI，讓字幕高亮不卡住
+    audio.currentTime = start; // 發出 seek，不立刻 play
+  }
+
+  function handleSeeking(e: React.SyntheticEvent<HTMLAudioElement>) {
+    console.log('[seek] seeking currentTime=', e.currentTarget.currentTime);
+    setCurrentTime(e.currentTarget.currentTime);
+  }
+
+  function handleSeeked(e: React.SyntheticEvent<HTMLAudioElement>) {
+    const audio = e.currentTarget;
+    console.log('[seek] seeked currentTime=', audio.currentTime);
+    setCurrentTime(audio.currentTime);
+
+    if (shouldAutoplayAfterSeekRef.current) {
+      shouldAutoplayAfterSeekRef.current = false;
+      pendingSeekRef.current = null;
+      console.log('[seek] play after seeked');
+      void audio.play().catch(() => {});
+    } else {
+      pendingSeekRef.current = null;
     }
   }
 
-  const text = (s: string) => dark ? 'text-slate-200' : 'text-slate-800';
+  function handleCanPlay(e: React.SyntheticEvent<HTMLAudioElement>) {
+    const audio = e.currentTarget;
+    console.log('[seek] canplay currentTime=', audio.currentTime, 'pending=', pendingSeekRef.current);
+
+    if (pendingSeekRef.current !== null && shouldAutoplayAfterSeekRef.current) {
+      shouldAutoplayAfterSeekRef.current = false;
+      pendingSeekRef.current = null;
+      console.log('[seek] play after canplay');
+      void audio.play().catch(() => {});
+    }
+  }
+
   const faint = dark ? 'text-slate-500' : 'text-slate-400';
   const border = dark ? 'border-slate-700' : 'border-slate-200';
   const bg = dark ? 'bg-slate-900' : 'bg-slate-50';
@@ -75,6 +113,9 @@ export default function SrtReviewPanel({
           src={audioUrl}
           controls
           onTimeUpdate={e => setCurrentTime(e.currentTarget.currentTime)}
+          onSeeking={handleSeeking}
+          onSeeked={handleSeeked}
+          onCanPlay={handleCanPlay}
           className="w-full h-9 rounded-xl"
           style={{ colorScheme: dark ? 'dark' : 'light' }}
         />
@@ -103,7 +144,7 @@ export default function SrtReviewPanel({
                 <span className={`text-[10px] font-mono shrink-0 mt-0.5 ${faint}`}>
                   {formatSec(entry.start)}
                 </span>
-                <span className={`text-[11px] leading-relaxed ${isActive ? (dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold') : text(dark ? 'dark' : 'light')}`}>
+                <span className={`text-[11px] leading-relaxed ${isActive ? (dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold') : (dark ? 'text-slate-200' : 'text-slate-800')}`}>
                   {entry.text}
                 </span>
               </div>

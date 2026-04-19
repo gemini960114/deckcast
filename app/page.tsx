@@ -891,14 +891,38 @@ export default function Home() {
 
     setStep3State({ status: 'loading' });
     try {
-      const blob = new Blob([await file.arrayBuffer()], { type: getAudioMimeType(file, 'audio/mpeg') });
+      let blob: Blob;
+      const sourceMime = getAudioMimeType(file, 'audio/wav');
+      const needsNormalize = !isMp3File(file);
+
+      if (needsNormalize) {
+        setToast(`正在標準化音訊格式（${file.name}）...`);
+        const arrayBuf = await file.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuf);
+        let binary = '';
+        const chunkSize = 8192;
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+        }
+        const audioBase64 = btoa(binary);
+        const res = await apiFetch('/api/normalize-podcast-audio', { audioBase64, mimeType: sourceMime });
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText || '音檔標準化失敗');
+        }
+        blob = await res.blob();
+        blob = new Blob([await blob.arrayBuffer()], { type: 'audio/mpeg' });
+      } else {
+        blob = new Blob([await file.arrayBuffer()], { type: 'audio/mpeg' });
+      }
+
       setPodcastInputMode('upload');
       resetPodcastDerivedState();
       setPodcastBlob(blob);
       setPodcastSource('upload');
       setStep3State({ status: 'done' });
       if (recordId) await updateRecord(recordId, { podcastBlob: blob, podcastSource: 'upload', contentLanguage }, normalizedOwnerEmail);
-      setToast(`已上傳音訊：${file.name}`);
+      setToast(needsNormalize ? `已完成標準化並上傳：${file.name}` : `已上傳音訊：${file.name}`);
       setTimeout(() => step4Ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 300);
     } catch (e) {
       setStep3State({ status: 'error', error: String(e) });
@@ -977,6 +1001,7 @@ export default function Home() {
         script,
         audioBase64,
         audioMimeType: podcastBlob.type || 'audio/mpeg',
+        duration,
         textModel,
         step41Model: multimodalModel,
         step42Model: textModel,
@@ -1690,132 +1715,19 @@ export default function Home() {
             </p>
           </div>
 
-          {/* Narration mode selector */}
           <div className="mb-4">
-            <label className={labelCls}>表達模式</label>
-            <div className={`rounded-2xl border p-1.5 grid grid-cols-3 gap-1 ${t.inner}`}>
-              {([
-                { id: 'duo' as NarrationMode, label: '雙人對談' },
-                { id: 'solo_explainer' as NarrationMode, label: '單人講解' },
-                { id: 'solo_story' as NarrationMode, label: '單人說故事' },
-              ]).map(({ id, label }) => {
-                const active = narrationMode === id;
-                return (
-                  <button
-                    key={id}
-                    onClick={() => handleNarrationModeChange(id)}
-                    className={`rounded-xl px-3 py-2 text-center transition-all border text-xs font-bold ${active
-                      ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
-                      : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Speakers + style fields — wider grid */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <div>
-              <label className={labelCls}>
-                {isDuo ? 'Speaker 1' : narrationMode === 'solo_explainer' ? '講者' : '敘事者'}
-              </label>
-              <input
-                type="text" value={speaker1} onChange={e => setSpeaker1(e.target.value)}
-                placeholder={isDuo ? '男生為節目主持人' : narrationMode === 'solo_explainer' ? '清晰的專業講者' : '有畫面感的故事敘述者'}
-                className={inputCls}
-              />
-            </div>
-            {isDuo && (
-              <div>
-                <label className={labelCls}>Speaker 2</label>
-                <input type="text" value={speaker2} onChange={e => setSpeaker2(e.target.value)} placeholder="女生為 Mary 老師" className={inputCls} />
-              </div>
+            <label className={labelCls}>內容語言</label>
+            <select value={contentLanguage} onChange={e => setContentLanguage(e.target.value as ContentLanguage)} className={selectCls}>
+              {CONTENT_LANGUAGE_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            {contentLanguage !== 'zh-TW' && (
+              <p className={`mt-1 text-[10px] ${dark ? 'text-amber-400/80' : 'text-amber-600'}`}>
+                非繁體中文建議搭配 Gemini 文字模型使用
+              </p>
             )}
-            <div>
-              <label className={labelCls}>
-                {isDuo ? '對話形式' : narrationMode === 'solo_explainer' ? '講解形式' : '敘事形式'}
-              </label>
-              <input
-                type="text" value={dialogueStyle} onChange={e => setDialogueStyle(e.target.value)}
-                placeholder={isDuo ? '自然流暢的對話' : narrationMode === 'solo_explainer' ? '清楚、穩定、條理分明' : '流動、有畫面感'}
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
-              <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂" className={inputCls} />
-            </div>
-            <div>
-              <label className={labelCls}>內容語言</label>
-              <select value={contentLanguage} onChange={e => setContentLanguage(e.target.value as ContentLanguage)} className={selectCls}>
-                {CONTENT_LANGUAGE_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-              {contentLanguage !== 'zh-TW' && (
-                <p className={`mt-1 text-[10px] ${dark ? 'text-amber-400/80' : 'text-amber-600'}`}>
-                  非繁體中文建議搭配 Gemini 文字模型使用
-                </p>
-              )}
-              <p className={`mt-0.5 text-[10px] ${t.faint}`}>影響 Podcast 文稿、語音、歌詞與歌曲生成</p>
-            </div>
-            <div>
-              <label className={labelCls}>旁白長度</label>
-              <select value={narrationLengthPreset} onChange={e => handleNarrationLengthPresetChange(e.target.value as NarrationLengthPreset)} className={selectCls}>
-                {NARRATION_LENGTH_PRESETS.map(opt => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>長度補充說明（選填）</label>
-              <input
-                type="text"
-                value={narrationLengthNote}
-                onChange={e => handleNarrationLengthNoteChange(e.target.value)}
-                placeholder="例如：前言精簡、案例頁詳細、最後一頁收短一點"
-                className={inputCls}
-              />
-            </div>
-          </div>
-
-          {/* Voices + music — 4 col */}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className={labelCls.replace('mb-1', '')}>Voice 1</label>
-                <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70`}>▶試聽</button>
-              </div>
-              <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls}>
-                {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
-              </select>
-            </div>
-            {isDuo && (
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
-                  <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70`}>▶試聽</button>
-                </div>
-                <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls}>
-                  {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
-                </select>
-              </div>
-            )}
-            <div>
-              <label className={labelCls}>歌曲風格</label>
-              <select value={styleId} onChange={e => setStyleId(Number(e.target.value))} className={selectCls}>
-                {MUSIC_STYLES.map(s => <option key={s.id} value={s.id}>{s.id}. {s.label}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className={labelCls}>歌詞長度</label>
-              <select value={lyricsDuration} onChange={e => setLyricsDuration(e.target.value)} className={selectCls}>
-                {LYRICS_DURATIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
-              </select>
-            </div>
+            <p className={`mt-0.5 text-[10px] ${t.faint}`}>影響 Podcast 文稿、語音、歌詞與歌曲生成</p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 mt-4">
@@ -1898,6 +1810,101 @@ export default function Home() {
         {/* ── Step 2 ── */}
         <div ref={step2Ref}>
           <StepCard step={2} title={isDuo ? '生成 Podcast 文稿' : narrationMode === 'solo_explainer' ? '生成講解腳本' : '生成敘事腳本'} state={step2State} disabled={!slides} dark={dark}>
+            {/* Narration mode selector */}
+            <div className="mb-3">
+              <label className={labelCls}>表達模式</label>
+              <div className={`rounded-2xl border p-1.5 grid grid-cols-1 sm:grid-cols-3 gap-1 ${t.inner}`}>
+                {([
+                  { id: 'duo' as NarrationMode, label: '雙人對談' },
+                  { id: 'solo_explainer' as NarrationMode, label: '單人講解' },
+                  { id: 'solo_story' as NarrationMode, label: '單人說故事' },
+                ]).map(({ id, label }) => {
+                  const active = narrationMode === id;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => handleNarrationModeChange(id)}
+                      disabled={step2State.status === 'loading' || isEditingScript}
+                      className={`rounded-xl px-3 py-2 text-center transition-all border text-xs font-bold ${active
+                        ? (dark ? 'bg-emerald-900/40 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-300 text-emerald-800')
+                        : (dark ? 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-emerald-800' : 'bg-white border-slate-200 text-slate-500 hover:border-emerald-200')
+                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Speakers + style fields */}
+            <div className={`mb-3 rounded-2xl border px-3 py-3 ${t.inner}`}>
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div>
+                  <p className={`text-[10px] uppercase tracking-[0.24em] font-bold ${t.label}`}>腳本設定</p>
+                  <p className={`mt-1 text-[11px] leading-relaxed ${t.faint}`}>
+                    這些欄位會直接影響 Step 2 文稿的人設、節奏與長度。
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>
+                  {isDuo ? 'Speaker 1' : narrationMode === 'solo_explainer' ? '講者' : '敘事者'}
+                </label>
+                <input
+                  type="text" value={speaker1} onChange={e => setSpeaker1(e.target.value)}
+                  placeholder={isDuo ? '阿哲' : narrationMode === 'solo_explainer' ? '清晰的專業講者' : '有畫面感的故事敘述者'}
+                  disabled={step2State.status === 'loading' || isEditingScript}
+                  className={inputCls}
+                />
+              </div>
+              {isDuo && (
+                <div>
+                  <label className={labelCls}>Speaker 2</label>
+                  <input type="text" value={speaker2} onChange={e => setSpeaker2(e.target.value)} placeholder="Mary 老師"
+                    disabled={step2State.status === 'loading' || isEditingScript} className={inputCls} />
+                </div>
+              )}
+              <div>
+                <label className={labelCls}>
+                  {isDuo ? '對話形式' : narrationMode === 'solo_explainer' ? '講解形式' : '敘事形式'}
+                </label>
+                <input
+                  type="text" value={dialogueStyle} onChange={e => setDialogueStyle(e.target.value)}
+                  placeholder={isDuo ? '自然流暢的對話' : narrationMode === 'solo_explainer' ? '清楚、穩定、條理分明' : '流動、有畫面感'}
+                  disabled={step2State.status === 'loading' || isEditingScript}
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>{isDuo ? '語氣風格' : '整體基調'}</label>
+                <input type="text" value={tone} onChange={e => setTone(e.target.value)} placeholder="親切、易懂"
+                  disabled={step2State.status === 'loading' || isEditingScript} className={inputCls} />
+              </div>
+              <div>
+                <label className={labelCls}>旁白長度</label>
+                <select value={narrationLengthPreset} onChange={e => handleNarrationLengthPresetChange(e.target.value as NarrationLengthPreset)}
+                  disabled={step2State.status === 'loading' || isEditingScript} className={selectCls}>
+                  {NARRATION_LENGTH_PRESETS.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>長度補充說明（選填）</label>
+                <input
+                  type="text"
+                  value={narrationLengthNote}
+                  onChange={e => handleNarrationLengthNoteChange(e.target.value)}
+                  placeholder="例如：前言精簡、案例頁詳細、最後一頁收短一點"
+                  disabled={step2State.status === 'loading' || isEditingScript}
+                  className={inputCls}
+                />
+              </div>
+              </div>
+            </div>
+
             <div className="mb-3">
               <label className="flex items-start gap-2 cursor-pointer">
                 <input
@@ -1951,6 +1958,18 @@ export default function Home() {
         {/* ── Step 3 ── */}
         <div ref={step3Ref}>
           <StepCard step={3} title={isDuo ? '生成 Podcast 音訊' : narrationMode === 'solo_explainer' ? '生成講解音訊' : '生成敘事音訊'} state={step3State} disabled={!script || isEditingScript} dark={dark}>
+            <p className={`mb-3 text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-slate-800/60 border-slate-700 text-slate-300' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+              建議至&nbsp;
+              <a
+                href="https://aistudio.google.com/generate-speech?model=gemini-2.5-pro-preview-tts"
+                target="_blank"
+                rel="noreferrer"
+                className={`font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
+              >
+                Google AI Studio Speech
+              </a>
+              &nbsp;自行生成 Podcast 音訊，完成後再回來上傳。
+            </p>
             <div className={`mb-3 rounded-2xl border p-1.5 grid grid-cols-2 gap-1 ${t.inner}`}>
               {[
                 { id: 'api' as const, title: 'API 生成', desc: '使用目前的Podcast生成流程' },
@@ -1986,6 +2005,33 @@ export default function Home() {
                   : '正在匯入音訊檔案...'} dark={dark} />
               : podcastInputMode === 'api' ? (
                 <div className="space-y-3">
+                  <div className={`rounded-2xl border px-3 py-3 ${t.inner}`}>
+                    <p className={`mb-3 text-[11px] leading-relaxed ${t.faint}`}>
+                      Voice 設定只會套用在 API 生成模式；切換到上傳音訊時，這些選項不會使用。
+                    </p>
+                    <div className={`grid gap-3 ${isDuo ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-1'}`}>
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className={labelCls.replace('mb-1', '')}>{isDuo ? 'Voice 1' : 'Voice'}</label>
+                        <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                      </div>
+                      <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                        {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
+                      </select>
+                    </div>
+                    {isDuo && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
+                          <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                        </div>
+                        <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                          {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  </div>
                   {ttsChunkingEnabled && (
                     <div className="flex flex-wrap items-center gap-2">
                       <label className={`text-xs whitespace-nowrap ${t.faint}`}>TTS 生成模式</label>
@@ -2004,7 +2050,7 @@ export default function Home() {
                     const chunkCount = estimateChunkCount(script, TTS_CHUNK_CHARS);
                     const pauseSec   = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
                     const estSec     = speechSec + (ttsGenerationMode === 'chunked' ? pauseSec : 0);
-                    const estMin     = Math.ceil(estSec * 0.8 / 60);  // 實測約為估算值的 80%
+                    const estMin     = Math.ceil(estSec / 60);
                     if (estSec >= TTS_LONG_SEC) {
                       return (
                         <p className={`text-[11px] leading-relaxed rounded-lg px-3 py-2 border ${dark ? 'bg-amber-900/30 border-amber-700/60 text-amber-300' : 'bg-amber-50 border-amber-300 text-amber-800'}`}>
@@ -2022,18 +2068,6 @@ export default function Home() {
                     return null;
                   })()}
                   <ActionBtn onClick={handleGeneratePodcast}>{step3State.status === 'done' && podcastInputMode === 'api' ? '重新生成 Podcast' : '生成 Podcast 音訊'}</ActionBtn>
-                  <p className={`text-[11px] leading-relaxed ${t.faint}`}>
-                    也可至
-                    <a
-                      href="https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts"
-                      target="_blank"
-                      rel="noreferrer"
-                      className={`mx-1 font-semibold ${dark ? 'text-emerald-400 hover:text-emerald-300' : 'text-emerald-700 hover:text-emerald-600'}`}
-                    >
-                      Google AI Studio Speech
-                    </a>
-                    自行生成 Podcast 音訊，完成後再回來上傳。
-                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -2191,6 +2225,20 @@ export default function Home() {
               <p className={`text-xs mt-1 ${t.muted}`}>
                 依講稿生成：歌詞會更貼近 Step 2 的敘事與鋪陳；依投影片生成：歌詞會更聚焦投影片重點。
               </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className={labelCls}>歌曲風格</label>
+                <select value={styleId} onChange={e => setStyleId(Number(e.target.value))} className={selectCls} disabled={step5State.status === 'loading' || isEditingLyrics}>
+                  {MUSIC_STYLES.map(s => <option key={s.id} value={s.id}>{s.id}. {s.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>歌詞長度</label>
+                <select value={lyricsDuration} onChange={e => setLyricsDuration(e.target.value)} className={selectCls} disabled={step5State.status === 'loading' || isEditingLyrics}>
+                  {LYRICS_DURATIONS.map(d => <option key={d.value} value={d.value}>{d.label}</option>)}
+                </select>
+              </div>
             </div>
             {step5State.status === 'loading'
               ? <LoadingBar message="正在生成歌詞..." dark={dark} />

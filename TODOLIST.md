@@ -570,3 +570,59 @@
 ### 24.7 相容性驗證（G / H）
 - [x] **`copyMode="speaker-only"` 相容**（驗證，不改碼）：只過濾非 Speaker 行，行內 `[tag]` 不受影響
 - [x] **`extractDialogue()` / `extractSoloScript()` 相容**（驗證，不改碼）：兩函式均不清除行內 `[tag]`，Step 3 TTS 可直接接收帶 tags 腳本
+
+## 25. 2026-04-19 UI 設定遷移 + TTS 估時修正 + align-podcast duration（Plan G）
+
+### 25.1 UI 設定欄位遷移（`app/page.tsx`）
+- [x] **歌曲風格 / 歌詞長度**：從 Step 0 設定區遷入 Step 5 歌詞生成區
+- [x] **Voice 1 / Voice 2**：從 Step 0 設定區遷入 Step 3 API 生成區（`podcastInputMode === 'api'` 時顯示）
+- [x] **表達模式 / Speaker 1 / Speaker 2 / 對話形式 / 語氣風格 / 旁白長度 / 長度補充說明**：從 Step 0 設定區遷入 Step 2 Podcast 文稿生成區
+- [x] **內容語言**：保留於 Step 0 設定區，改為獨立 `mb-4` div，不再與其他欄位混排
+
+### 25.2 TTS 估時係數修正（`lib/ttsEstimate.ts`、`lib/constants.ts`）
+- [x] **`CHARS_PER_MIN` 調整為 1.5 倍**：`duo: 220→330` / `solo_explainer: 230→345` / `solo_story: 200→300`，與實測語速吻合
+- [x] **警示門檻調高**：`TTS_WARN_SEC: 150→200` / `TTS_LONG_SEC: 240→320`，配合新係數不誤報
+- [x] **`estMin` 移除 `× 0.8` 校正**：新係數下已不需要額外折扣
+
+### 25.3 預設值調整（`lib/constants.ts`）
+- [x] **`DEFAULT_SPEAKER1 = '阿哲'`**（簡化名稱）
+- [x] **`DEFAULT_SPEAKER2 = 'Mary 老師'`**（簡化名稱）
+- [x] **`DEFAULT_NARRATION_LENGTH_PRESET = 'brief'`**（預設精簡）
+
+### 25.4 Step 3 UI 文案更新（`app/page.tsx`）
+- [x] **提示文字改為「建議至」**，移至 StepCard 標題下方
+- [x] **連結更新**為 `https://aistudio.google.com/generate-speech?model=gemini-2.5-pro-preview-tts`
+
+### 25.5 align-podcast duration 修正（Plan G）
+- [x] **前端 `runAlignPodcast()` 傳入 `duration`**：呼叫 `getAudioDuration(podcastBlob)` 取得實際音訊長度作為 `clientDuration`
+- [x] **`app/api/align-podcast/route.ts` 使用 `clientDurationSafe` 為最高優先**：依序 fallback 至 Whisper `transcriptionDuration` → Gemini SRT `lastSrtEnd`
+- [x] **safety floor `Math.max(totalDuration, lastSrtEnd)`**：確保 SRT 最後一筆 end 不超出時間軸
+- [x] **`AlignPodcastDiagnostics` 新增 4 欄位**（`lib/types.ts`）：`clientDuration` / `transcriptionDuration` / `lastSrtEnd` / `finalTotalDuration`
+- [x] **Script fallback 路徑補入 `clientDurationSafe` 優先**（expert review 修正）
+
+## 26. 2026-04-19 Plan H：SrtReviewPanel seek/play 時序修正
+
+- [x] **新增 `pendingSeekRef` / `shouldAutoplayAfterSeekRef`**（`components/SrtReviewPanel.tsx`）：兩個 ref 分別記錄 pending seek 目標與「seek 前是否正在播放」
+- [x] **`seekTo()` 改版**：不再立刻 `play()`；記錄 `!audio.paused` → `shouldAutoplayAfterSeekRef`，先更新 UI state，再設 `audio.currentTime`
+- [x] **`handleSeeking`**：只做 `setCurrentTime()` + console.log，不判斷 play
+- [x] **`handleSeeked`**：更新 currentTime；若 `shouldAutoplayAfterSeekRef` 為 true 則 play，play 前先清掉兩個 ref；否則只清 `pendingSeekRef`
+- [x] **`handleCanPlay`（保底）**：只在 `pendingSeekRef !== null && shouldAutoplayAfterSeekRef` 同時成立時觸發 play，觸發後立即清掉兩個 ref，防止重入
+- [x] **`<audio>` 綁定 `onSeeking` / `onSeeked` / `onCanPlay`**
+- [x] **`scrollIntoView` 改為 `behavior: 'instant'`**：避免拖拉時 smooth scroll 造成視覺混亂
+- [x] **所有 `play()` 加 `.catch(() => {})`**：防止 autoplay policy UnhandledRejection
+
+## 27. 2026-04-19 Plan I：外部上傳 Podcast 音檔標準化為 MP3
+
+### 27.1 後端 API（`app/api/normalize-podcast-audio/route.ts`，新建）
+- [x] **接收 `{ audioBase64, mimeType }`**，支援 wav / m4a / aac 來源
+- [x] **FFmpeg 轉碼**：`-ac 1 -ar 24000 -b:a 128k`（mono / 24000 Hz / 128 kbps MP3）
+- [x] **`getFFmpegBinary()`**：共用 `VIDEO_FFMPEG_BIN` env，Windows 本地開發與 Docker/Cloud Run 均相容
+- [x] **暫存目錄 `/tmp/podcast-normalize`**，`finally` 區塊雙檔 unlink 確保清理
+- [x] **轉檔失敗回 500 明確錯誤**，不 silently fallback；`maxDuration=120`
+- [x] **body size 限制 80MB**（50MB 檔案 base64 後 ≈ 67MB，加安全餘裕）
+
+### 27.2 前端（`app/page.tsx`）
+- [x] **`handlePodcastUpload()` 條件式標準化**：`isMp3File()` 為 true 直接用原始檔；否則 chunked base64 編碼（8192 bytes/chunk，防大檔 stack overflow）POST 到 normalize API
+- [x] **標準化後 blob 設為 `podcastBlob`**（type: `audio/mpeg`）；`podcastSource` 維持 `'upload'`
+- [x] **Toast 區分**：`已完成標準化並上傳：{file.name}` vs `已上傳音訊：{file.name}`
+- [x] **`logUsage()` 接入**（後端）：`normalize-podcast-audio` 行為已記錄

@@ -2,9 +2,9 @@ import type { NarrationMode } from './types';
 
 // 語速係數（字/分鐘）
 const CHARS_PER_MIN: Record<NarrationMode, number> = {
-  duo:            220,
-  solo_explainer: 230,
-  solo_story:     200,
+  duo:            330,
+  solo_explainer: 345,
+  solo_story:     300,
 };
 
 /** 計算腳本中 Speaker 台詞的總字數（排除投影片標題與風格行） */

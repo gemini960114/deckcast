@@ -139,12 +139,14 @@ export async function POST(req: NextRequest) {
     logUsage(getEmailFromRequest(req), 'align-podcast');
     // Vercel / Cloud Run 預設 NextRequest 對於 body size 在 standalone runtime 相對寬鬆，
     // 但為避免超過預設 JSON parse 上限，通常建議從前端直傳 base64 字串配合前端限流。
-    const { script, audioBase64, audioMimeType, textModel, step41Model, step42Model, contentLanguage } = await req.json();
+    const { script, audioBase64, audioMimeType, duration: clientDuration, textModel, step41Model, step42Model, contentLanguage } = await req.json();
     const whisperLanguage = mapContentLanguageToWhisperLanguage(contentLanguage as ContentLanguage | undefined);
 
     if (!script || !audioBase64) {
       return NextResponse.json({ error: 'Missing script or audio data' }, { status: 400 });
     }
+
+    const clientDurationSafe = typeof clientDuration === 'number' && clientDuration > 0 ? clientDuration : 0;
 
     const slideCount = extractSlideCount(script);
     const requestedPhase2Model = resolveTextModel(step42Model ?? textModel);
@@ -157,6 +159,10 @@ export async function POST(req: NextRequest) {
       asrMode: isWhisperConfigured() ? 'whisper+gemini' : 'gemini-only',
       srtSource: 'none',
       timingSource: 'equal-fallback',
+      clientDuration: clientDurationSafe,
+      transcriptionDuration: 0,
+      lastSrtEnd: 0,
+      finalTotalDuration: 0,
       issues: [],
     };
 
@@ -173,9 +179,15 @@ export async function POST(req: NextRequest) {
         });
 
         srtEntries = transcription.srtEntries;
-        totalDuration = typeof transcription.duration === 'number' && transcription.duration > 0
-          ? transcription.duration
-          : (srtEntries[srtEntries.length - 1]?.end ?? 0);
+        const transcriptionDuration = typeof transcription.duration === 'number' && transcription.duration > 0
+          ? transcription.duration : 0;
+        diagnostics.transcriptionDuration = transcriptionDuration;
+
+        totalDuration = clientDurationSafe > 0
+          ? clientDurationSafe
+          : transcriptionDuration > 0
+            ? transcriptionDuration
+            : (srtEntries[srtEntries.length - 1]?.end ?? 0);
 
         if (srtEntries.length) {
           diagnostics.phase1Success = true;
@@ -229,7 +241,10 @@ export async function POST(req: NextRequest) {
           script,
           textModel: phase1ModelName,
         });
-        totalDuration = srtEntries[srtEntries.length - 1]?.end ?? totalDuration;
+        const geminiLastEnd = srtEntries[srtEntries.length - 1]?.end ?? 0;
+        totalDuration = clientDurationSafe > 0
+          ? clientDurationSafe
+          : geminiLastEnd > 0 ? geminiLastEnd : totalDuration;
         srt = srtEntriesToText(srtEntries);
         if (srtEntries.length) {
           diagnostics.phase1Success = true;
@@ -245,11 +260,19 @@ export async function POST(req: NextRequest) {
     if (!srt) {
       srt = buildFallbackPodcastSrt(script);
       diagnostics.srtSource = srt ? 'script-fallback' : 'none';
-      totalDuration = totalDuration || (srtEntries[srtEntries.length - 1]?.end ?? 0);
+      totalDuration = clientDurationSafe > 0
+        ? clientDurationSafe
+        : totalDuration || (srtEntries[srtEntries.length - 1]?.end ?? 0);
       if (!srt) {
         diagnostics.issues.push('Script fallback SRT is empty.');
       }
     }
+
+    // 保底：totalDuration 不得小於最後一筆 SRT end，避免尾端字幕落在時間軸外
+    const lastSrtEnd = srtEntries[srtEntries.length - 1]?.end ?? 0;
+    totalDuration = Math.max(totalDuration, lastSrtEnd);
+    diagnostics.lastSrtEnd = lastSrtEnd;
+    diagnostics.finalTotalDuration = totalDuration;
 
     // ----- Phase 2: AI finds slide transitions from Text + SRT entries -----
     let matches: MusicTransitionMatch[] = [];

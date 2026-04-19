@@ -87,8 +87,9 @@
 - 雙人模式：Speaker 1 / 2 各自對應不同聲音（可於設定選擇）
 - 單人模式：僅使用 Speaker 1 聲音，TTS payload 自動調整為單聲道設定
 - 也支援上傳外部產製音訊（`mp3 / wav / m4a / aac`，50MB 以內）
+- **上傳音訊自動標準化**：上傳 `wav / m4a / aac` 時，系統自動呼叫後端 FFmpeg 將音訊轉換為標準 MP3（mono / 24000 Hz / 128 kbps），改善外部音檔 seek 穩定性；`mp3` 來源直接使用，不重編碼
 - 下載時會保留與原始 blob 相符的副檔名
-- 若想在外部先生成再回來上傳，可使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-flash-preview-tts)
+- 若想在外部先生成再回來上傳，建議使用 [Google AI Studio Speech](https://aistudio.google.com/generate-speech?model=gemini-2.5-pro-preview-tts)
 - **TTS 生成模式（使用者可選）**：Step 3 API 生成區提供下拉選單，讓使用者選擇生成策略：
   - `不分段（音色較一致）`（預設）：整段腳本一次送 TTS，聲音連貫；長稿後段音質可能略降
   - `自動分段（較不易破音）`：長篇腳本以投影片邊界自動切段，各段 PCM 串接並插入 800ms 靜音，解決破音問題
