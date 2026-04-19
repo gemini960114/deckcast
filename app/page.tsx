@@ -1844,9 +1844,7 @@ export default function Home() {
               </select>
             </div>
           </div>
-          <p className={`mt-3 text-[11px] leading-relaxed ${t.faint}`}>
-            第一組用於 PDF 與 audio 這類多模態理解；第二組用於純文字推理與對齊。只有在已設定 `LOCAL_LLM_*` 時，第二組才會出現 <span className="font-semibold">{localLlmLabel}</span>。
-          </p>
+
         </div>
 
         {/* ── Step 1: Upload PDF ── */}
