@@ -94,6 +94,7 @@
 - **TTS 生成模式（使用者可選）**：Step 3 API 生成區提供下拉選單，讓使用者選擇生成策略：
   - `不分段（音色較一致）`（預設）：整段腳本一次送 TTS，聲音連貫；長稿後段音質可能略降
   - `自動分段（較不易破音）`：長篇腳本以投影片邊界自動切段，各段 PCM 串接並插入 800ms 靜音，解決破音問題
+  - **每一批次都會重新注入完整 AUDIO PROFILE preamble**（新格式 → `# AUDIO PROFILE / ## Speaker1/2 / # SCENE / # SAMPLE CONTEXT`；舊格式 → `風格:` 單行）送進 Gemini TTS，確保段與段之間的聲線 / 口音 / 節奏保持一致，避免長稿中段音色漂移；preamble 不計入每段字數上限 `TTS_CHUNK_CHARS`
   - 選單只在 `TTS_CHUNKING_ENABLED=true`（server 已開啟分段功能）時顯示；`false` 時整個欄位隱藏，預設不分段
   - 每段字數上限由 `TTS_CHUNK_CHARS`（預設 800）控制，切段失敗時最多自動重試 2 次
 
