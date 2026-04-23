@@ -1968,6 +1968,64 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
 - `GenerationRecord` 新增 `narrationMode?: NarrationMode` 欄位，隨專案存入 IndexedDB
 
 
+## v20 — Podcast 文稿 preamble 升級為 AUDIO PROFILE 多區塊
+
+- **舊格式**：Step 2 `/api/generate-script` 第一行輸出 `風格: [...]` 單行，TTS
+  在 `extractDialogue` / `extractSoloScript` 擷取此行作為朗讀指令。
+- **新格式**：Step 2 改輸出結構化的多區塊 preamble：
+
+  ```
+  # AUDIO PROFILE
+
+  ## Speaker1: 「persona 標籤」
+  Style: ...
+  Accent: ...
+  Pacing: ...
+
+  ## Speaker2: 「persona 標籤」     ← 只在 duo 模式出現
+  Style: ...
+  Accent: ...
+  Pacing: ...
+
+  # SCENE
+  1-3 句場景描述
+
+  # SAMPLE CONTEXT
+  1-3 句情境鋪陳
+
+  投影片 1：[標題]
+  Speaker 1: ...
+  ```
+
+- **Prompt 改動**（`lib/prompts.ts`）：
+  - `DUO_PODCAST_PROMPT_TEMPLATE` / `SOLO_EXPLAINER_PROMPT_TEMPLATE` /
+    `SOLO_STORY_PROMPT_TEMPLATE` 範例章節全部改成 AUDIO PROFILE 新樣板
+  - `buildLanguageBlock` 的「不可翻譯標記列表」新增 8 個新 label
+  - `buildAudioTagsBlock` 規則 1 擴充禁止在任何 preamble 行加 tag
+- **共用模組**（`lib/scriptFormat.ts`，新建）：
+  - `PREAMBLE_BLOCK_RE`：抓整個 AUDIO PROFILE 區塊（停在第一個 `投影片 N：` 之前）
+  - `LEGACY_STYLE_LINE_RE`：舊格式單行 `風格:` 的相容 fallback
+  - `PREAMBLE_LINE_RE`：用於 fallback SRT 的單行過濾（共用給 align-podcast）
+  - `extractPreamble` / `extractSpeakerBlock` / `summarizePreambleForTts`：
+    三個 parser helper
+  - `extractDialogue` / `extractSoloScript` / `splitScriptIntoChunks`：
+    從 `app/api/generate-podcast/route.ts` 搬家到此，同時支援新舊格式
+- **TTS 輸入策略**（`summarizePreambleForTts`）：
+  - Duo：per-speaker 指令 `Make Speaker N sound like <persona>. <style> <accent> <pacing>`
+    （Gemini 多講者 TTS 的 native directive 語法）
+  - Solo：只產 Speaker 1 一行
+  - SCENE / SAMPLE CONTEXT **不送 TTS**（對聲音合成無用，只會稀釋 directive 權重）
+  - markdown 標記一律剝除
+  - Duo 路徑外層包 `[Voice direction — do not read this block aloud]` /
+    `[End voice direction]` 降低 TTS 朗讀指令本身的機率
+- **align-podcast**（`app/api/align-podcast/route.ts`）：`buildFallbackPodcastSrt`
+  改用共用 `PREAMBLE_LINE_RE`；Speaker 名字前綴（Mary老師:/阿哲: 等）保留獨立 filter
+- **向後相容**：IndexedDB 內舊格式 script（以 `風格:` 開頭）仍走 legacy 分支，
+  行為與過往完全一致；新舊格式在同一後端自動分流
+- **測試**：`__tests__/scriptFormat.test.ts` 新增 46 個 vitest cases 涵蓋新舊格式
+  parser、per-speaker 擷取、Voice direction 框架、Solo Script: 區塊純淨性、
+  chunk preamble 重注入、`PREAMBLE_LINE_RE` 正負案例邊界
+
 ## v19 — Step 2 Audio Tags 語氣標籤
 
 - Step 2 生成區新增「自動加入語氣標籤（Audio Tags）」checkbox（預設關閉，位於生成按鈕上方）
