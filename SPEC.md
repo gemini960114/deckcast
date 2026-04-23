@@ -1968,6 +1968,77 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
 - `GenerationRecord` 新增 `narrationMode?: NarrationMode` 欄位，隨專案存入 IndexedDB
 
 
+## v21 — TTS 分段字數上限依內容語言倍率調整（plan_B）
+
+> 動機：`TTS_CHUNK_CHARS = 800` 對中文剛好 ~145 秒，但英文 TTS 語速約 825
+> chars/min，同樣 800 字只有 ~58 秒，chunk 切得過碎、浪費 Gemini 呼叫，UI
+> 估時也會誤算為中文語速導致長稿警示誤觸發。日韓語速也與中文有落差。
+> 本版把 `TTS_CHUNK_CHARS` 降為「中文基準常數」，另加 per-language 倍率，
+> 讓每個 chunk 的**實際音訊長度**在四語言都壓在 145-160 秒區間。
+
+- **倍率 map**（`lib/constants.ts`）：
+
+  | 語言 | 倍率 | `effectiveChunkChars` | 對應音訊長度 |
+  |---|---:|---:|---:|
+  | zh-TW | 1.00x | 800 | ~145s |
+  | en | 2.50x | 2000 | ~145s |
+  | ja | 1.50x | 1200 | ~160s |
+  | ko | 1.25x | 1000 | ~145s |
+
+  ```ts
+  export const TTS_CHUNK_LANG_MULTIPLIER: Record<ContentLanguage, number> = {
+    'zh-TW': 1.0, en: 2.5, ja: 1.5, ko: 1.25,
+  };
+
+  export function resolveTtsChunkChars(language?: ContentLanguage): number {
+    const lang = language ?? DEFAULT_CONTENT_LANGUAGE;
+    const mult = TTS_CHUNK_LANG_MULTIPLIER[lang] ?? 1.0;
+    return Math.round(TTS_CHUNK_CHARS * mult);
+  }
+  ```
+
+- **向後相容**：`resolveTtsChunkChars(undefined)` fallback 到 zh-TW 基準 800
+  chars；舊 IndexedDB 紀錄（無 `contentLanguage` 欄位）行為與過往完全一致。
+
+- **語速係數雙軸化**（`lib/ttsEstimate.ts`）：
+  `CHARS_PER_MIN` 從 `Record<NarrationMode, number>` 擴成
+  `Record<NarrationMode, Record<ContentLanguage, number>>`。
+  zh-TW 數值為 2026-04-19 UI 遷移時的實測校正基準（duo=330 / solo_explainer=345
+  / solo_story=300）；en / ja / ko 依倍率推算，尚未實測微調。
+
+  `estimateTtsDuration()` 新增可選 `language` 參數（預設 `'zh-TW'`，向後相容）。
+  `estimateChunkCount()` 簽名不變（仍吃明確的 `chunkChars`），呼叫端透過
+  `resolveTtsChunkChars()` 傳入語言感知的 `effectiveChunkChars`。
+
+- **呼叫點**：
+  - `app/api/generate-podcast/route.ts`：切段前先算
+    `const effectiveChunkChars = resolveTtsChunkChars(contentLanguage);`，再傳給
+    `splitScriptIntoChunks()`；`console.log` 一併輸出 `effectiveChunkChars`。
+  - `app/page.tsx`：line 1999-2000（長稿警示）與 line 2049-2050（TTS 生成模式
+    顯示）兩處同步改用語言感知版本；`estimateTtsDuration` 多帶 `contentLanguage`。
+
+- **警示閾值不動**：`TTS_WARN_SEC = 200` / `TTS_LONG_SEC = 320` 是對**實際音訊
+  秒數**的門檻，`estimateTtsDuration` 依語言算出正確秒數後，閾值邏輯自動正確。
+  英文 3000 字 script 修正前會被中文係數誤算為 ~545 秒（誤觸長稿警示），修正
+  後正確算出 ~218 秒，只觸發中稿建議「改用自動分段」。
+
+- **Chunked 模式行為承接 plan_A**：每個 chunk 開頭仍重新注入原始 preamble，確保
+  段與段之間聲線 / 口音 / 節奏一致；`blockChars` 仍不含 preamble，長 preamble
+  不會擠掉對白字數。
+
+- **測試（97 tests 全綠，+7 cases）**：
+  - `resolveTtsChunkChars` 五個 lookup：zh-TW=800 / en=2000 / ja=1200 /
+    ko=1000 / undefined=800（fallback 驗證）
+  - 語言感知切段邊界：1800-char script 在 zh-TW 基準（800）下至少切 3 段；
+    同一份 script 在 en 倍率（2000）下只切成 1 段
+
+- **風險點**：en=2.5x 與 ko=1.25x 是**估算值，尚未真實 TTS 聽測驗證**。若實機跑
+  出音訊 > 3 分鐘或後段破音，fallback 策略是：
+  - en → 降 `TTS_CHUNK_LANG_MULTIPLIER.en` 為 2.0（1600 chars）
+  - ko → 降為 1.1（880 chars）
+
+  改動為 `lib/constants.ts` 一行修改，不需 revert 整個 commit。
+
 ## v20 — Podcast 文稿 preamble 升級為 AUDIO PROFILE 多區塊
 
 > 歷程備註：v20 初版曾試圖把 AUDIO PROFILE 壓縮為 `Make Speaker N sound like ...`

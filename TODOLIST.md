@@ -689,3 +689,46 @@
 - **Python SDK ground truth**：使用者提供的 Python 範例直接把整段 AUDIO PROFILE markdown 作為 `generate_content(contents=...)` 的文字內容，TTS 產出正常、不念 markdown、Speaker 1/2 聲線正確分化
 - **修正後契約**：後端不壓縮、不包框架；保留整段 markdown；per-speaker 分工完全交給 `multiSpeakerVoiceConfig.speakerVoiceConfigs`
 - **避免再走冤枉路**：`summarizePreambleForTts` 仍 export 但不呼叫，保留做測試用；`speechConfig.voiceInstructions` 在當前 `@google/genai` SDK 不存在，不要當 fallback 計畫
+
+## 29. 2026-04-23 plan_B 完成項目（TTS 分段字數上限依語言倍率）
+
+### 29.1 常數與 helper（`lib/constants.ts`）
+- [x] **新增 `TTS_CHUNK_LANG_MULTIPLIER`**：`Record<ContentLanguage, number>`；zh-TW=1.0 / en=2.5 / ja=1.5 / ko=1.25
+- [x] **新增 `resolveTtsChunkChars(language?)` helper**：`Math.round(TTS_CHUNK_CHARS * multiplier)`；未知語言或 undefined fallback 到 `DEFAULT_CONTENT_LANGUAGE = 'zh-TW'`（800 chars）；向後相容
+- [x] **`TTS_CHUNK_CHARS = 800` 保留**為中文基準常數，不動其值；註解改為「中文基準」明示角色
+
+### 29.2 語速係數雙軸化（`lib/ttsEstimate.ts`）
+- [x] **`CHARS_PER_MIN` 擴成 `Record<NarrationMode, Record<ContentLanguage, number>>`**：
+  - `duo`: zh-TW=330 / en=825 / ja=495 / ko=413
+  - `solo_explainer`: zh-TW=345 / en=862 / ja=518 / ko=431
+  - `solo_story`: zh-TW=300 / en=750 / ja=450 / ko=375
+  - zh-TW 為 2026-04-19 實測基準，其餘依倍率推算，尚未微調
+- [x] **`estimateTtsDuration()` 新增可選 `language` 參數**（default `'zh-TW'`，向後相容）
+- [x] **`estimateChunkCount()` 簽名不變**：仍吃明確的 `chunkChars`，呼叫端負責透過 `resolveTtsChunkChars()` 算出 `effectiveChunkChars`
+
+### 29.3 前後端呼叫點同步
+- [x] **`/api/generate-podcast` route 計算 `effectiveChunkChars`**（`app/api/generate-podcast/route.ts`）：切段前依 `contentLanguage` 套倍率；`console.log` 合併輸出 `contentLanguage` / `narrationMode` / `effectiveChunkChars`
+- [x] **`app/page.tsx` 兩處估時呼叫同步**：line 1999-2000（長稿警示）與 line 2049-2050（TTS 生成模式顯示）均改用 `resolveTtsChunkChars(contentLanguage)` + `estimateTtsDuration(script, narrationMode, contentLanguage)`
+- [x] **警示閾值不動**：`TTS_WARN_SEC = 200` / `TTS_LONG_SEC = 320` 是對實際音訊秒數的門檻；`estimateTtsDuration` 依語言算出正確秒數後，閾值邏輯自動正確，英文不再誤觸長稿警示
+
+### 29.4 測試（97 tests 全綠，+7 cases）
+- [x] **`resolveTtsChunkChars` lookup × 5**：zh-TW=800 / en=2000 / ja=1200 / ko=1000 / undefined=800（fallback 驗證）
+- [x] **語言感知切段邊界 × 2**：1800-char script 在 zh-TW 基準（800）下至少切 3 段；同份 script 在 en 倍率（2000）下只切 1 段
+- [x] **原 90 個測試無退化**
+
+### 29.5 Git commits
+- `66718e4 feat(tts-chunking): scale chunk char limit per content language`（code + tests）
+- `<TBD>  docs: sync TTS chunking per-language multiplier into SPEC/README/TODOLIST`（本 commit）
+
+### 29.6 待驗證項目
+- [ ] **T7.1 zh-TW baseline** — 實機跑一份 >2400 字中文長稿，確認 chunk 數 ≈ 3、每段 ~145s、聲線一致
+- [ ] **T7.2 en 2.5x（最關鍵，未實測倍率）** — 英文 >2400 字，預期 chunk 數 ≈ 2、每段 ≤180s；若 >3 分鐘或破音 → 降 `TTS_CHUNK_LANG_MULTIPLIER.en` 為 2.0（1600 chars）
+- [ ] **T7.3 ja 1.5x** — 日文 ~1800 字
+- [ ] **T7.4 ko 1.25x** — 韓文 ~2000 字；若 >3 分鐘 → 降為 1.1（880 chars）
+- [ ] **T7.5 向後相容** — 開無 `contentLanguage` 的舊紀錄，chunked 模式正常產音訊、log 顯示 `effectiveChunkChars=800`
+- [ ] **T7.6 UI 警示** — 英文 3000 字 single 模式應觸發「建議改用自動分段」而非「太長」
+
+### 29.7 設計備註
+- **為什麼不做 UI 選項**：使用者不需關心倍率，`contentLanguage` 選單已決定一切；倍率寫死在 compile-time 常數即可
+- **為什麼倍率不寫進 `GenerationRecord`**：`TTS_CHUNK_LANG_MULTIPLIER` 是 build-time 常數而非 per-record 偏好，若未來要調倍率只需改常數，不需資料遷移
+- **為什麼 `estimateChunkCount` 不直接收 language**：保持這個函式做純數學（字數除法），語言解析在呼叫端做；便於單元測試與日後重用

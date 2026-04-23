@@ -96,7 +96,8 @@
   - `自動分段（較不易破音）`：長篇腳本以投影片邊界自動切段，各段 PCM 串接並插入 800ms 靜音，解決破音問題
   - **每一批次都會重新注入完整 AUDIO PROFILE preamble**（新格式 → `# AUDIO PROFILE / ## Speaker1/2 / # SCENE / # SAMPLE CONTEXT`；舊格式 → `風格:` 單行）送進 Gemini TTS，確保段與段之間的聲線 / 口音 / 節奏保持一致，避免長稿中段音色漂移；preamble 不計入每段字數上限 `TTS_CHUNK_CHARS`
   - 選單只在 `TTS_CHUNKING_ENABLED=true`（server 已開啟分段功能）時顯示；`false` 時整個欄位隱藏，預設不分段
-  - 每段字數上限由 `TTS_CHUNK_CHARS`（預設 800）控制，切段失敗時最多自動重試 2 次
+  - 每段字數上限由 `TTS_CHUNK_CHARS`（中文基準 800）控制，切段失敗時最多自動重試 2 次
+  - **依內容語言自動調整字數上限**（v21）：`TTS_CHUNK_LANG_MULTIPLIER` 把中文基準乘上每語言倍率——英文 × 2.5（2000 字）、日文 × 1.5（1200 字）、韓文 × 1.25（1000 字），確保每個 chunk 的實際音訊長度都在 145-160 秒區間，不因語言差異導致 chunk 過碎（英文若沿用 800 字只有 ~58 秒）或長稿警示誤觸發；舊紀錄無 `contentLanguage` 欄位時 fallback 到中文基準
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
