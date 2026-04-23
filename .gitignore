@@ -56,3 +56,5 @@ ssl/
 # ── Local planning / review docs (not for repo) ──
 plan*.md
 recommand*.md
+task*.md
+tts.md
