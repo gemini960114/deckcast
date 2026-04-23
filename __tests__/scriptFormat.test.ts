@@ -219,33 +219,31 @@ describe('summarizePreambleForTts', () => {
 // --- extractDialogue (duo) --------------------------------------------
 
 describe('extractDialogue', () => {
-  it('wraps guidance in [Voice direction ...] markers for new duo scripts', () => {
+  it('forwards the full AUDIO PROFILE markdown verbatim (Python-parity contract)', () => {
     const out = extractDialogue(NEW_DUO_SCRIPT);
-    expect(out.startsWith('[Voice direction — do not read this block aloud]')).toBe(true);
-    expect(out).toContain('[End voice direction]');
-    // Must contain guidance for both speakers.
-    expect(out).toContain('Make Speaker 1 sound');
-    expect(out).toContain('Make Speaker 2 sound');
+    // Preamble must arrive unchanged so Gemini's multi-speaker TTS can use it.
+    expect(out.startsWith('# AUDIO PROFILE')).toBe(true);
+    expect(out).toContain('## Speaker1:');
+    expect(out).toContain('## Speaker2:');
+    expect(out).toContain('# SCENE');
+    expect(out).toContain('# SAMPLE CONTEXT');
+    expect(out).toContain('Style:');
+    expect(out).toContain('Accent:');
+    expect(out).toContain('Pacing:');
+    // And dialogue must follow after a blank line.
+    expect(out).toMatch(/\n\nSpeaker 1: /);
+    // Must NOT contain the old directive/wrapper strings — those break Gemini.
+    expect(out).not.toContain('[Voice direction');
+    expect(out).not.toContain('[End voice direction]');
+    expect(out).not.toContain('Make Speaker 1 sound');
+    expect(out).not.toContain('Make Speaker 2 sound');
   });
 
-  it('wraps legacy scripts with the same Voice direction frame', () => {
+  it('forwards legacy 風格: preamble verbatim', () => {
     const out = extractDialogue(LEGACY_DUO_SCRIPT);
-    expect(out.startsWith('[Voice direction — do not read this block aloud]')).toBe(true);
-    expect(out).toContain('輕鬆對談、帶點幽默');
-    expect(out).toContain('[End voice direction]');
-  });
-
-  it('never forwards markdown markers or SCENE text to TTS', () => {
-    const out = extractDialogue(NEW_DUO_SCRIPT);
-    expect(out).not.toMatch(/^#\s/m);
-    expect(out).not.toMatch(/^##\s/m);
-    expect(out).not.toMatch(/^Style\s*:/m);
-    expect(out).not.toMatch(/^Accent\s*:/m);
-    expect(out).not.toMatch(/^Pacing\s*:/m);
-    expect(out).not.toContain('AUDIO PROFILE');
-    expect(out).not.toContain('# SCENE');
-    expect(out).not.toContain('SAMPLE CONTEXT');
-    expect(out).not.toContain('午後的 Podcast 錄音間');
+    expect(out.startsWith('風格: 輕鬆對談、帶點幽默')).toBe(true);
+    expect(out).toMatch(/\n\nSpeaker 1: /);
+    expect(out).not.toContain('[Voice direction');
   });
 
   it('preserves Speaker 1 and Speaker 2 dialogue lines', () => {
@@ -270,13 +268,14 @@ describe('extractDialogue', () => {
 // --- extractSoloScript -------------------------------------------------
 
 describe('extractSoloScript', () => {
-  it('emits "Read the following script..." with delivery guidance and clean Script:', () => {
+  it('emits "Read the following script..." with the preamble as a Delivery profile block', () => {
     const out = extractSoloScript(NEW_SOLO_SCRIPT);
     expect(out.startsWith('Read the following script naturally.')).toBe(true);
-    expect(out).toContain('Vocal delivery guidance:');
-    expect(out).toContain('Make Speaker 1 sound');
+    expect(out).toContain('Delivery profile:');
+    expect(out).toContain('# AUDIO PROFILE');
+    expect(out).toContain('## Speaker1:');
     expect(out).toContain('\n\nScript:\n');
-    // Script: section must only contain dialogue lines.
+    // Script: section must only contain clean dialogue lines.
     const afterScript = out.split('\n\nScript:\n')[1];
     expect(afterScript).toBeTruthy();
     expect(afterScript).not.toMatch(/^#/m);
@@ -299,7 +298,7 @@ describe('extractSoloScript', () => {
     ].join('\n');
     const out = extractSoloScript(bare);
     expect(out).toContain('Read the following script naturally.');
-    expect(out).not.toContain('Vocal delivery guidance:');
+    expect(out).not.toContain('Delivery profile:');
     expect(out).toContain('這是一段測試。');
   });
 

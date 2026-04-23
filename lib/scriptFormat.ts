@@ -99,14 +99,17 @@ export function extractSpeakerBlock(
 }
 
 /**
- * Turn a preamble into plain-text delivery guidance for TTS.
+ * Legacy helper (kept exported for tests and as an escape hatch):
+ * flatten an AUDIO PROFILE preamble into plain-text delivery guidance.
  *
- * - Legacy `風格: ...` → returns the text after the prefix.
- * - New AUDIO PROFILE → emits Gemini-native per-speaker directives
- *   `Make Speaker N sound like <persona>. <style> <accent> <pacing>`.
- * - SCENE / SAMPLE CONTEXT are intentionally NOT included (they belong to
- *   LLM script generation, not TTS delivery).
- * - Solo mode omits Speaker 2 entirely.
+ * NOTE: As of the Python-parity fix, this is NOT used by extractDialogue
+ * or extractSoloScript. The verified-working pattern is to forward the
+ * preamble markdown verbatim to Gemini TTS, which handles multi-speaker
+ * attribution natively via multiSpeakerVoiceConfig and does not read the
+ * `#` / `##` headings aloud.
+ *
+ * The function is retained so external callers (or future experimentation)
+ * can still produce a compressed directive if needed.
  */
 export function summarizePreambleForTts(
   preamble: string,
@@ -147,24 +150,23 @@ export function summarizePreambleForTts(
   return parts.join('\n');
 }
 
-/** Wrap guidance with a "do not read this block aloud" protective frame. */
-function wrapVoiceDirection(guidance: string): string {
-  return [
-    '[Voice direction — do not read this block aloud]',
-    guidance,
-    '[End voice direction]',
-  ].join('\n');
-}
-
 /**
- * Duo TTS input: Voice direction wrapper + Speaker lines.
- * - All Speaker N (<角色名>): parenthetical names are stripped.
- * - Preamble markers (# AUDIO PROFILE / ## SpeakerN / Style/Accent/Pacing /
- *   # SCENE / # SAMPLE CONTEXT) are NOT forwarded to TTS.
+ * Duo TTS input: full preamble markdown (verbatim) + Speaker N: dialogue lines.
+ *
+ * Matches the verified-working Python reference: Gemini's multi-speaker TTS
+ * attributes voices via `multiSpeakerVoiceConfig.speakerVoiceConfigs` and
+ * reads the AUDIO PROFILE markdown as delivery context without speaking the
+ * `#` / `##` / `Style:` markers aloud. Attempting to compress the preamble
+ * into a custom `Make Speaker N sound like ...` directive — or to wrap it
+ * with synthetic tags like `[Voice direction — do not read this block aloud]`
+ * — breaks the model and causes empty/error responses that surface as
+ * `TypeError: Failed to fetch` on the client.
+ *
+ * Parenthetical speaker names like `Speaker 1 (主持人):` are still stripped
+ * so the `speakerVoiceConfigs` speaker label match stays exact.
  */
 export function extractDialogue(script: string): string {
   const preamble = extractPreamble(script);
-  const guidance = summarizePreambleForTts(preamble, 'duo');
 
   const dialogueLines = script
     .split('\n')
@@ -173,19 +175,19 @@ export function extractDialogue(script: string): string {
     .join('\n');
 
   if (!dialogueLines) return '';
-  if (!guidance) return dialogueLines;
-
-  return `${wrapVoiceDirection(guidance)}\n\n${dialogueLines}`;
+  return preamble ? `${preamble}\n\n${dialogueLines}` : dialogueLines;
 }
 
 /**
  * Solo TTS input: `Read the following script ... Script: <lines>`.
- * Guidance (if any) is injected as "Vocal delivery guidance: <...>" before the
- * Script: block. Preamble markers are stripped.
+ *
+ * The preamble (if any) is embedded as a `Delivery profile:` block between
+ * the base instruction and the `Script:` block. The Speaker 1: prefix is
+ * stripped from each dialogue line because single-speaker TTS does not use
+ * `speakerVoiceConfigs` and would otherwise read the prefix aloud.
  */
 export function extractSoloScript(script: string): string {
   const preamble = extractPreamble(script);
-  const guidance = summarizePreambleForTts(preamble, 'solo');
 
   const dialogueLines = script
     .split('\n')
@@ -198,8 +200,8 @@ export function extractSoloScript(script: string): string {
 
   const base =
     'Read the following script naturally. Do not read the word "Script:" or any metadata.';
-  const instruction = guidance
-    ? `${base} Vocal delivery guidance: ${guidance}\n\nScript:\n`
+  const instruction = preamble
+    ? `${base}\n\nDelivery profile:\n${preamble}\n\nScript:\n`
     : `${base}\n\nScript:\n`;
 
   return instruction + dialogueLines.join('\n');
