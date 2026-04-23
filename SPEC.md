@@ -1970,6 +1970,13 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
 
 ## v20 — Podcast 文稿 preamble 升級為 AUDIO PROFILE 多區塊
 
+> 歷程備註：v20 初版曾試圖把 AUDIO PROFILE 壓縮為 `Make Speaker N sound like ...`
+> per-speaker directive、並以 `[Voice direction — do not read this block aloud]`
+> 框架包住送進 Gemini TTS；實測造成 `TypeError: Failed to fetch`（TTS 回應異常
+> 觸發 dev server 斷線）。改以 Python SDK 參考實作為 ground truth，確認 Gemini
+> multi-speaker TTS 本身就能吸收整段 AUDIO PROFILE markdown 作為情境語境，且不會
+> 把 `#` / `##` / `Style:` 等 markdown 標記念出來。以下為最終落地行為。
+
 - **舊格式**：Step 2 `/api/generate-script` 第一行輸出 `風格: [...]` 單行，TTS
   在 `extractDialogue` / `extractSoloScript` 擷取此行作為朗讀指令。
 - **新格式**：Step 2 改輸出結構化的多區塊 preamble：
@@ -2010,21 +2017,54 @@ dispatcher 函式 `buildNarrationPrompt({ mode, speaker1, speaker2?, dialogueSty
     三個 parser helper
   - `extractDialogue` / `extractSoloScript` / `splitScriptIntoChunks`：
     從 `app/api/generate-podcast/route.ts` 搬家到此，同時支援新舊格式
-- **TTS 輸入策略**（`summarizePreambleForTts`）：
-  - Duo：per-speaker 指令 `Make Speaker N sound like <persona>. <style> <accent> <pacing>`
-    （Gemini 多講者 TTS 的 native directive 語法）
-  - Solo：只產 Speaker 1 一行
-  - SCENE / SAMPLE CONTEXT **不送 TTS**（對聲音合成無用，只會稀釋 directive 權重）
-  - markdown 標記一律剝除
-  - Duo 路徑外層包 `[Voice direction — do not read this block aloud]` /
-    `[End voice direction]` 降低 TTS 朗讀指令本身的機率
+- **TTS 輸入策略（Python-parity，最終版）**：
+  - **Duo `extractDialogue`**：`${preamble}\n\n${dialogueLines}` — 整段
+    markdown preamble 原封不動送進 Gemini TTS；`multiSpeakerVoiceConfig`
+    的 `speakerVoiceConfigs` 做 speaker↔voice 對應；`Speaker N (角色名):`
+    括號仍然剝除，確保 speaker label 與 config 完全一致。
+  - **Solo `extractSoloScript`**：指令改為
+    `Read the following script naturally. Do not read the word "Script:" or any metadata.`
+    後接 `Delivery profile:\n${preamble}\n\nScript:\n${dialogueLines}`；
+    Script: 區塊只含 Speaker 1 對白。
+  - **SCENE / SAMPLE CONTEXT 一併送進 TTS**：Gemini 能把它們當情境語境吸收，
+    對聲音表現有加分；舊版嘗試強制剝除反而稀釋效果。
+  - **不再使用 `Make Speaker N sound like ...` 與 `[Voice direction — do not
+    read this block aloud]`**：這兩個 pattern 是 v20 初版自行發明的語法，不
+    是 Gemini 文件行為；實測會讓 Gemini 回非 audio 或 crash。
+  - **不嘗試 `speechConfig.voiceInstructions`**：已驗證當前 `@google/genai`
+    SDK 不支援此欄位，不要寫進 fallback 計畫。
+  - `summarizePreambleForTts(preamble, mode)` 仍 export 供測試 / 未來實驗
+    使用，但生產路徑已不再呼叫。
+- **Chunked 模式**：`splitScriptIntoChunks` 每個 chunk 開頭重新注入原始
+  markdown preamble（新格式 → `# AUDIO PROFILE ...`；舊格式 → `風格: ...`）。
+  字數預算（`blockChars`）計算不含 preamble，維持與舊版 `風格:` 單行相同語意。
+- **Markdown preservation**（`lib/stripMarkdown.ts`）：`/api/generate-script`
+  pipeline 走 `stripMarkdown()`，原本 `^#{1,6}\s+` 會把 `# AUDIO PROFILE` /
+  `## Speaker1:` 前綴一起剝掉；新增 `PRESERVED_HEADING_RE` 白名單精確保留
+  `# AUDIO PROFILE` / `## Speaker1:` / `## Speaker2:` / `# SCENE` /
+  `# SAMPLE CONTEXT` 五個結構性標題，其他 Markdown 標題仍正常 strip。line-by-line
+  transform（若該行匹配 `PRESERVED_HEADING_RE` 跳過 heading strip；其餘 regex
+  照舊處理 bold / italic / list / code-fence / link / hr）。`## Speaker3:` 與
+  `## Speaker 1:`（中間有空格的變體）仍被當成普通 markdown strip。
 - **align-podcast**（`app/api/align-podcast/route.ts`）：`buildFallbackPodcastSrt`
-  改用共用 `PREAMBLE_LINE_RE`；Speaker 名字前綴（Mary老師:/阿哲: 等）保留獨立 filter
+  改用共用 `PREAMBLE_LINE_RE`；Speaker 名字前綴（`Mary老師:` / `阿哲:` 等）
+  為 per-script persona tag 不是格式標記，保留獨立 filter。
+- **lib/srt.ts lyrics fallback**：`buildFallbackSrtEntriesFromLyrics` 亦套用
+  `PREAMBLE_LINE_RE` 作 defense-in-depth；歌曲 header metadata
+  （`歌曲名稱:` / `總時長:` / `節奏:` / `關鍵元素:`）仍由既有 filter 清理。
 - **向後相容**：IndexedDB 內舊格式 script（以 `風格:` 開頭）仍走 legacy 分支，
-  行為與過往完全一致；新舊格式在同一後端自動分流
-- **測試**：`__tests__/scriptFormat.test.ts` 新增 46 個 vitest cases 涵蓋新舊格式
-  parser、per-speaker 擷取、Voice direction 框架、Solo Script: 區塊純淨性、
-  chunk preamble 重注入、`PREAMBLE_LINE_RE` 正負案例邊界
+  行為與過往完全一致；新舊格式在同一後端自動分流。
+- **測試（90 tests 全綠）**：
+  - `__tests__/scriptFormat.test.ts`：46+ 個 cases 覆蓋新舊格式 parser、
+    per-speaker 擷取、Python-parity 契約（整段 markdown 送進 TTS，禁止出現
+    `[Voice direction` / `Make Speaker N sound`）、Solo `Script:` 區塊純淨性、
+    chunk preamble 重注入、`PREAMBLE_LINE_RE` 正負案例邊界。
+  - `__tests__/stripMarkdown.test.ts`（新）：8 cases — 一般 markdown strip、
+    五個 preserved headings 保留、其他 heading 仍被 strip、`## Speaker3:` /
+    `## Speaker 1:`（有空格）當 plain markdown 處理。
+  - `__tests__/srt.test.ts`（+5 regression）：`buildFallbackSrtEntriesFromLyrics`
+    正常歌詞保留、句中含 style/accent/pacing 子字串不誤刪、podcast preamble
+    洩入時會被正確 strip、歌曲 header 清理、全 metadata 區塊輸出 0 entries。
 
 ## v19 — Step 2 Audio Tags 語氣標籤
 

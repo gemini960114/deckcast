@@ -37,10 +37,11 @@
 - 每張投影片約 30–60 秒內容量，並依照模式與複雜度自然調整長度
 - 可自訂說話者角色（單人模式僅 Speaker 1）、對話形式與語氣風格
 - 切換模式時，文稿與後續歌詞／SRT／timings 會自動清除，避免舊模式內容殘留
+- **AUDIO PROFILE preamble（v20）**：Step 2 文稿首段改為結構化 `# AUDIO PROFILE` 多區塊，取代舊的 `風格: ...` 單行。LLM 會依使用者輸入的 Speaker 人設、對話形式、語氣風格、內容語言與 slides 主題，推論出每位講者的 `Style / Accent / Pacing` 三欄 persona，以及 `# SCENE` / `# SAMPLE CONTEXT` 情境鋪陳。duo 模式必含 Speaker1 / Speaker2 兩個區塊；solo 模式只含 Speaker1。preamble 整段送入 Gemini multi-speaker TTS 作為情境語境，模型不會把 `#` / `##` / `Style:` 等 markdown 標記念出來；使用者可在前端「編輯腳本」介面看到完整 preamble 並手動微調。舊格式 `風格: ...` 單行 script（IndexedDB 歷史紀錄）仍完全相容，後端會自動分流處理。
 - **Audio Tags（語氣標籤）**：Step 2 生成區提供「自動加入語氣標籤（Audio Tags）」checkbox（預設關閉）
   - 勾選後，重新生成的腳本會依模式自動插入少量白名單語氣 tags，如 `[enthusiasm]`、`[short pause]`
   - 白名單（12 個）：`[neutral]` / `[enthusiasm]` / `[interest]` / `[curiosity]` / `[positive]` / `[tension]` / `[slow]` / `[fast]` / `[short pause]` / `[long pause]` / `[whispers]` / `[laughs]`
-  - Tags 只出現在 `Speaker` 台詞行，不影響 `風格:` 或 `投影片 N:` 等 parser 結構標記
+  - Tags 只出現在 `Speaker` 台詞行，不可放在 AUDIO PROFILE 任何行（`# AUDIO PROFILE` / `## Speaker1/2:` / `Style/Accent/Pacing:` / `# SCENE` / `# SAMPLE CONTEXT`）、`風格:` 行或 `投影片 N:` 行
   - Step 3 TTS 與 Step 2「複製全文」均保留 tags 不清除
   - 建議搭配 `gemini-3.1-flash-tts-preview` 使用；其他 TTS 模型亦可運作，效果未保證
   - `audioTagsEnabled` 儲存於 `GenerationRecord`，重新載入歷史紀錄後可還原；切換後立即持久化
@@ -234,7 +235,7 @@ Step 7  AI 聆聽並產生 音樂 簡報 (精準對齊)
 
 **作用範圍**：同時影響 Podcast 文稿（Step 2）、歌詞（Step 5）、及對應的 TTS / 音樂生成（Step 3 / 6）。  
 **語言強制約束**：四種語言皆有明確的語言指定 block，主體內容不得改用其他語言作為主要輸出；歌詞 prompt 另有獨立且更嚴格的語言 block，`zh-TW / ja / ko` 明確禁止英文成為主體歌詞，`en` 則要求英文為主體而非反向禁止。  
-**結構標記不會隨語言改變**：不論選哪種語言，`風格:` / `投影片 N:` / `Speaker 1:` / `Speaker 2:` / `[Verse N] [Slide N]` 標記均維持固定格式，確保 parser 與後續流程穩定。  
+**結構標記不會隨語言改變**：不論選哪種語言，`# AUDIO PROFILE` / `## Speaker1:` / `## Speaker2:` / `Style:` / `Accent:` / `Pacing:` / `# SCENE` / `# SAMPLE CONTEXT`（新格式）、`風格:`（舊格式）、`投影片 N:` / `Speaker 1:` / `Speaker 2:` / `[Verse N] [Slide N]` 標記均維持固定格式，確保 parser 與後續流程穩定。  
 **本地 LLM 注意事項**：非繁中內容建議搭配 Gemini 文字模型使用；本地 `Gemma 4 31B (Custom)` 在非繁中時可能有標記翻譯的風險，UI 會顯示提示。  
 **切換語言後**：已生成的文稿與歌詞不會自動清除，若需要對齊新語言請手動重新生成。
 

@@ -626,3 +626,66 @@
 - [x] **標準化後 blob 設為 `podcastBlob`**（type: `audio/mpeg`）；`podcastSource` 維持 `'upload'`
 - [x] **Toast 區分**：`已完成標準化並上傳：{file.name}` vs `已上傳音訊：{file.name}`
 - [x] **`logUsage()` 接入**（後端）：`normalize-podcast-audio` 行為已記錄
+
+## 28. 2026-04-23 plan_A 完成項目（Podcast 文稿 preamble 升級為 AUDIO PROFILE 多區塊）
+
+### 28.1 新 preamble 格式與 prompt（`lib/prompts.ts`）
+- [x] **三個 narration template 樣板改寫**：`DUO_PODCAST_PROMPT_TEMPLATE` / `SOLO_EXPLAINER_PROMPT_TEMPLATE` / `SOLO_STORY_PROMPT_TEMPLATE` 均改為輸出 `# AUDIO PROFILE / ## SpeakerN: / Style / Accent / Pacing / # SCENE / # SAMPLE CONTEXT` 結構；duo 必含兩 Speaker 區塊，solo 只能有 Speaker1（不可出現 Speaker2）
+- [x] **新增「AUDIO PROFILE 生成規則」硬約束**：Style / Accent / Pacing 三欄必填；兩位 Speaker 需互有差異；AUDIO PROFILE 區塊內禁止 audio tag；`# AUDIO PROFILE` 之前不得出現任何說明文字
+- [x] **`buildLanguageBlock` 不可翻譯標記列表擴充**：新增 8 個 label（`# AUDIO PROFILE` / `## Speaker1:` / `## Speaker2:` / `Style:` / `Accent:` / `Pacing:` / `# SCENE` / `# SAMPLE CONTEXT`）
+- [x] **`buildAudioTagsBlock` 規則 1 擴充**：audio tag 不可放在任何 preamble 行或 `投影片 N:` 行
+
+### 28.2 共用模組（`lib/scriptFormat.ts`，新建）
+- [x] **`PREAMBLE_BLOCK_RE`**：雙 alternation 匹配 — 前半 lazy 停在第一個 `投影片 N：`，後半處理尚未產生 slide marker 的文稿。避免用 `|$` 在 lookahead 裡（multiline `$` 會讓 lazy 錯誤地停在第一行）
+- [x] **`LEGACY_STYLE_LINE_RE`**：舊格式單行 `風格:` 相容 fallback
+- [x] **`PREAMBLE_LINE_RE`**：共用單行過濾規則，支援 `風格:` / `# AUDIO PROFILE` / `# SCENE` / `# SAMPLE CONTEXT` / `## SpeakerN:` / `Style:` / `Accent:` / `Pacing:` / `投影片 N:`；行首 + 冒號才觸發，避免誤殺句中含這些字的正文
+- [x] **`extractPreamble(script)`**：新舊格式自動分流，無 preamble 回空字串
+- [x] **`extractSpeakerBlock(preamble, n)`**：結構化抓出第 N 位 Speaker 的 `{ persona, style, accent, pacing }`；缺欄位回空字串而非 undefined
+- [x] **`summarizePreambleForTts(preamble, mode)`**：保留為 exported helper（供測試 / 未來實驗），但生產路徑已不再呼叫
+- [x] **`extractDialogue` / `extractSoloScript` / `splitScriptIntoChunks`**：從 `app/api/generate-podcast/route.ts` 搬家到此，同時支援新舊格式；`app/api/generate-podcast/route.ts` 改為 `import { ... } from '@/lib/scriptFormat'`
+
+### 28.3 TTS 輸入策略（Python-parity，ground truth）
+- [x] **Duo `extractDialogue`**：`${preamble}\n\n${dialogueLines}` — 整段 markdown preamble 原封不動送進 Gemini TTS；`Speaker N (角色名):` 括號仍剝除，確保與 `speakerVoiceConfigs` 的 speaker label 完全一致
+- [x] **Solo `extractSoloScript`**：`Read the following script naturally. Do not read the word "Script:" or any metadata.` + `Delivery profile:\n${preamble}\n\nScript:\n${dialogueLines}`；`Script:` 區塊只含 Speaker 1 對白
+- [x] **SCENE / SAMPLE CONTEXT 一併送進 TTS**：Gemini 能吸收為情境語境，對聲音表現有加分
+- [x] **明確移除自行發明的 directive 框架**：不再使用 `Make Speaker N sound like ...` 與 `[Voice direction — do not read this block aloud]`；實測這兩個 pattern 會讓 Gemini 回非 audio 或 crash，前端錯誤訊號為 `TypeError: Failed to fetch`
+- [x] **不使用 `speechConfig.voiceInstructions`**：已驗證當前 `@google/genai` SDK 不支援此欄位
+
+### 28.4 Chunked 模式
+- [x] **每個 chunk 重新注入原始 markdown preamble**：新格式 → `# AUDIO PROFILE ...`；舊格式 → `風格: ...`
+- [x] **`blockChars` 不含 preamble**：字數預算與舊版 `風格:` 單行語意一致，長 preamble 不會擠掉對白字數
+
+### 28.5 Markdown 保留（`lib/stripMarkdown.ts`）
+- [x] **`PRESERVED_HEADING_RE` 白名單**：精確保留 `# AUDIO PROFILE` / `## Speaker1:` / `## Speaker2:` / `# SCENE` / `# SAMPLE CONTEXT` 五個結構性標題，其他 Markdown heading 仍正常 strip
+- [x] **line-by-line transform**：若該行匹配 `PRESERVED_HEADING_RE` 跳過 heading strip；其餘 regex 照舊處理 bold / italic / list / code-fence / link / hr
+- [x] **驗證負面邊界**：`## Speaker3:` 與 `## Speaker 1:`（中間有空格的變體）仍被當成普通 markdown 正確 strip
+
+### 28.6 align-podcast / srt fallback
+- [x] **`app/api/align-podcast/route.ts` `buildFallbackPodcastSrt`**：改用共用 `PREAMBLE_LINE_RE` 取代舊的 `^風格` / `^投影片` 逐條 regex；Speaker 名字前綴（`Mary老師:` / `阿哲:` 等）保留獨立 filter
+- [x] **`lib/srt.ts` `buildFallbackSrtEntriesFromLyrics`**：套用 `PREAMBLE_LINE_RE` 作 defense-in-depth；歌曲 header metadata（`歌曲名稱:` / `總時長:` / `節奏:` / `關鍵元素:`）仍由既有 filter 清理
+
+### 28.7 向後相容
+- [x] **IndexedDB 舊格式 script 零破壞**：以 `風格:` 開頭的舊紀錄仍走 legacy 分支，parser / chunker / TTS 路徑行為與過往完全一致；新舊格式在同一後端自動分流，不需資料遷移
+
+### 28.8 App-level bug fix
+- [x] **`app/page.tsx` step3State dead `disabled` prop**（pre-existing, 順手修）：`line 1996` 三元運算中 `step3State.status === 'loading'` 的分支已被提前 return，該分支中的 `disabled={step3State.status === 'loading'}` 永遠是 false，TS 5.6+ 將此列為型別錯誤；刪除 4 處 dead props 讓 build 通過
+
+### 28.9 測試（90 tests 全綠）
+- [x] **新增 `__tests__/scriptFormat.test.ts`**：46+ cases — 新舊格式 `extractPreamble` / `extractSpeakerBlock` / `summarizePreambleForTts`；Python-parity 契約（整段 markdown 送 TTS，禁止出現 `[Voice direction` / `Make Speaker N sound`）；Solo `Script:` 區塊純淨性；chunk preamble 重注入；`PREAMBLE_LINE_RE` 正負案例邊界
+- [x] **新增 `__tests__/stripMarkdown.test.ts`**：8 cases — 一般 markdown strip / 五個 preserved headings 保留 / 其他 heading 仍被 strip / 負面邊界（`## Speaker3:` / `## Speaker 1:` 不被保留）
+- [x] **擴充 `__tests__/srt.test.ts`**：+5 regression cases for `buildFallbackSrtEntriesFromLyrics` — 正常歌詞保留、句中含 style/accent/pacing 子字串不誤刪、podcast preamble 洩入時正確 strip、歌曲 header 清理、全 metadata 區塊輸出 0 entries
+
+### 28.10 Git commits（時序順序）
+1. `a3dd960 refactor(podcast): add preamble parser with AUDIO PROFILE compat layer`
+2. `998d895 feat(prompts): upgrade podcast preamble to AUDIO PROFILE multi-section`
+3. `8c78939 fix(align-podcast): filter new AUDIO PROFILE lines from fallback SRT`
+4. `295eaf0 docs: document AUDIO PROFILE preamble in tts.md and SPEC.md`
+5. `13b40f5 fix(stripMarkdown): preserve AUDIO PROFILE preamble headings`
+6. `66c9c28 fix(podcast-tts): forward AUDIO PROFILE preamble verbatim (Python parity)`
+7. `43204d6 test(srt): lock down lyrics fallback behavior against PREAMBLE_LINE_RE`
+
+### 28.11 設計歷程備註（非代碼，供後續閱讀）
+- **v20 初版誤設計**：以為要在後端把 preamble 壓縮為 `Make Speaker N sound like <persona>. <style> <accent> <pacing>` per-speaker directive 並以 `[Voice direction — do not read this block aloud]` 框架包住。實際送 API → 回 `TypeError: Failed to fetch`
+- **Python SDK ground truth**：使用者提供的 Python 範例直接把整段 AUDIO PROFILE markdown 作為 `generate_content(contents=...)` 的文字內容，TTS 產出正常、不念 markdown、Speaker 1/2 聲線正確分化
+- **修正後契約**：後端不壓縮、不包框架；保留整段 markdown；per-speaker 分工完全交給 `multiSpeakerVoiceConfig.speakerVoiceConfigs`
+- **避免再走冤枉路**：`summarizePreambleForTts` 仍 export 但不呼叫，保留做測試用；`speechConfig.voiceInstructions` 在當前 `@google/genai` SDK 不存在，不要當 fallback 計畫
