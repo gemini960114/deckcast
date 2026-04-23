@@ -183,7 +183,14 @@ function buildLanguageBlock(language: ContentLanguage): string {
 以下所有實際講話內容必須使用 ${langLabel} 撰寫。
 主體內容不得改用其他語言作為主要輸出；可保留極少量不可避免的專有名詞原文。
 但以下固定結構標記不論內容語言為何，均必須維持原樣，不可翻譯：
-- 風格:
+- # AUDIO PROFILE
+- ## Speaker1:
+- ## Speaker2:
+- Style:
+- Accent:
+- Pacing:
+- # SCENE
+- # SAMPLE CONTEXT
 - 投影片 N:（N 為數字）
 - Speaker 1:
 - Speaker 2:
@@ -250,7 +257,7 @@ function buildAudioTagsBlock(mode: NarrationMode): string {
 - 本次腳本需在適當位置加入語氣標籤（audio tags）
 - 允許使用的 tags（僅限以下白名單）：${tagList}
 - 規則：
-  1. tags 必須放在 Speaker 台詞行內，不可放在「風格:」或「投影片 N:」行
+  1. tags 必須放在 Speaker 台詞行內，不可放在任何 preamble 行（# AUDIO PROFILE / ## Speaker1: / ## Speaker2: / Style: / Accent: / Pacing: / # SCENE / # SAMPLE CONTEXT）或「投影片 N:」行
   2. 不可連續放兩個 tag，tag 與正文之間必須有文字或標點隔開
   3. 每句最多 1 個 tag
   4. 每張投影片最多 2 到 3 個 tag
@@ -281,9 +288,25 @@ ${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote
 無論兩位主持人的名字叫什麼，講話前方的發言者標籤必須且只能使用 "Speaker 1:" 與 "Speaker 2:"。
 絕對不可以使用角色名字作為標籤。
 
-請嚴格依照以下格式輸出：
+請嚴格依照以下格式輸出（# AUDIO PROFILE 之前不可有任何其他文字或說明）：
 
-風格: [請依據內容產生適合的朗讀風格說明]
+# AUDIO PROFILE
+
+## Speaker1: [依 Speaker 1 人設與對話風格產生一個有畫面感的 persona 標籤]
+Style: [1-2 句聲線性格描述，需呼應 Speaker 1 人設與節目基調]
+Accent: [1 句口音或語氣風格定位]
+Pacing: [1 句節奏感描述]
+
+## Speaker2: [依 Speaker 2 人設與對話風格產生一個有畫面感的 persona 標籤]
+Style: [1-2 句聲線性格描述，需呼應 Speaker 2 人設與節目基調]
+Accent: [1 句口音或語氣風格定位]
+Pacing: [1 句節奏感描述]
+
+# SCENE
+[1-3 句場景描述，具畫面感，能呼應投影片主題]
+
+# SAMPLE CONTEXT
+[1-3 句情境鋪陳，說明兩位講者此刻的狀態或關係]
 
 投影片 1：[標題]
 Speaker 1: [台詞內容，可以在台詞內自稱名字]
@@ -292,6 +315,14 @@ Speaker 1: [台詞內容...]
 [視內容繼續對話]
 
 每張投影片請分段呈現。
+
+【AUDIO PROFILE 生成規則】
+- Style / Accent / Pacing 三欄必填，不可省略，不可合併
+- 請依據「主持人 1 人設 / 主持人 2 人設 / 對話風格 / 節目基調」四項使用者輸入推論，
+  不可與輸入矛盾（例如節目基調是「親切易懂」時不應生成「冷峻嚴肅」的 Style）
+- 兩位 Speaker 的 Style / Accent / Pacing 應互有差異，避免完全雷同
+- 不要在 AUDIO PROFILE 任何行加入語氣標籤（audio tags）
+- 不可在 # AUDIO PROFILE 之前輸出任何段落、說明、或 Markdown 前言
 
 【結尾要求】
 最後一張投影片請自然收束，不要突然中斷。
@@ -323,9 +354,20 @@ ${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote
 請使用單一講者格式，不要生成對話，不要出現第二角色。
 講話前方的標籤請固定使用 "Speaker 1:"。
 
-請嚴格依照以下格式輸出：
+請嚴格依照以下格式輸出（# AUDIO PROFILE 之前不可有任何其他文字或說明）：
 
-風格: [請依據內容產生適合的朗讀風格說明]
+# AUDIO PROFILE
+
+## Speaker1: [依講者人設與講解風格產生一個有畫面感的 persona 標籤]
+Style: [1-2 句聲線性格描述，需呼應講者人設與整體基調]
+Accent: [1 句口音或語氣風格定位]
+Pacing: [1 句節奏感描述]
+
+# SCENE
+[1-3 句場景描述，適合「專業講者在解說」的情境]
+
+# SAMPLE CONTEXT
+[1-3 句情境鋪陳，說明講者此刻正在向誰、為什麼講解這份內容]
 
 投影片 1：[標題]
 Speaker 1: ...
@@ -334,6 +376,13 @@ Speaker 1: ...
 Speaker 1: ...
 
 每張投影片請分段呈現。
+
+【AUDIO PROFILE 生成規則】
+- 單人模式只能有 ## Speaker1 區塊，不可出現 ## Speaker2
+- Style / Accent / Pacing 三欄必填，不可省略，不可合併
+- 請依據「講者人設 / 講解風格 / 整體基調」使用者輸入推論，不可與輸入矛盾
+- 不要在 AUDIO PROFILE 任何行加入語氣標籤（audio tags）
+- 不可在 # AUDIO PROFILE 之前輸出任何段落、說明、或 Markdown 前言
 
 【寫作要求】
 - 以清楚、穩定、條理分明的方式講解
@@ -366,9 +415,20 @@ ${buildNarrationLengthBlock(vars.narrationLengthPreset, vars.narrationLengthNote
 請使用單一講者格式，不要生成對話，不要出現第二角色。
 講話前方的標籤請固定使用 "Speaker 1:"。
 
-請嚴格依照以下格式輸出：
+請嚴格依照以下格式輸出（# AUDIO PROFILE 之前不可有任何其他文字或說明）：
 
-風格: [請依據內容產生適合的朗讀風格說明]
+# AUDIO PROFILE
+
+## Speaker1: [依敘事者人設與敘事風格產生一個有畫面感的 persona 標籤]
+Style: [1-2 句聲線性格描述，需呼應敘事者人設與整體基調]
+Accent: [1 句口音或語氣風格定位]
+Pacing: [1 句節奏感描述，通常帶有留白或呼吸感]
+
+# SCENE
+[1-3 句場景描述，具畫面感，適合敘事展開]
+
+# SAMPLE CONTEXT
+[1-3 句情境鋪陳，說明敘事者此刻所處的時空與心境]
 
 投影片 1：[標題]
 Speaker 1: ...
@@ -377,6 +437,13 @@ Speaker 1: ...
 Speaker 1: ...
 
 每張投影片請分段呈現。
+
+【AUDIO PROFILE 生成規則】
+- 單人敘事模式只能有 ## Speaker1 區塊，不可出現 ## Speaker2
+- Style / Accent / Pacing 三欄必填，不可省略，不可合併
+- 請依據「敘事者人設 / 敘事風格 / 整體基調」使用者輸入推論，不可與輸入矛盾
+- 不要在 AUDIO PROFILE 任何行加入語氣標籤（audio tags）
+- 不可在 # AUDIO PROFILE 之前輸出任何段落、說明、或 Markdown 前言
 
 【寫作要求】
 - 可以有畫面感、節奏感與情境鋪陳
