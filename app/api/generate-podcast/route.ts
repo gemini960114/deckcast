@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
 import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel, TTS_CHUNK_CHARS, CHUNK_GAP_MS } from '@/lib/constants';
 import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
+import {
+  extractDialogue,
+  extractSoloScript,
+  splitScriptIntoChunks,
+} from '@/lib/scriptFormat';
 
 export const maxDuration = 600;
 
@@ -34,136 +39,6 @@ function pcmToWav(pcmData: Uint8Array, sampleRate: number): Uint8Array {
 
   new Uint8Array(buffer).set(pcmData, 44);
   return new Uint8Array(buffer);
-}
-
-// Duo: keep 風格 + Speaker N lines; strip parenthetical names.
-function extractDialogue(script: string): string {
-  return script
-    .split('\n')
-    .filter(line => {
-      const t = line.trim();
-      return /^風格[：:]/.test(t) || /^Speaker\s+\d+/i.test(t);
-    })
-    .map(line => line.replace(/^(Speaker\s+\d+)\s*\([^)]*\)\s*:/i, '$1:'))
-    .join('\n');
-}
-
-// Solo: extract style instruction + strip "Speaker 1:" prefix from dialogue lines.
-// Returns a prompt shaped like the Python single-speaker TTS example:
-//   Read the following script... Style: <風格>. Do not read the word "Script:".
-//   Script:
-//   <line1>
-//   <line2>
-function extractSoloScript(script: string): string {
-  const lines = script.split('\n').map(l => l.trim()).filter(Boolean);
-
-  const styleLine = lines.find(l => /^風格[：:]/.test(l));
-  const styleText = styleLine ? styleLine.replace(/^風格[：:]\s*/, '').trim() : '';
-
-  const dialogueLines = lines
-    .filter(l => /^Speaker\s+1\s*(\([^)]*\))?\s*:/i.test(l))
-    .map(l => l.replace(/^Speaker\s+1\s*(\([^)]*\))?\s*:\s*/i, ''))
-    .filter(Boolean);
-
-  if (!dialogueLines.length) return '';
-
-  const instruction = styleText
-    ? `Read the following script naturally. Do not read the word "Script:" or any metadata. Style guidance: ${styleText}\n\nScript:\n`
-    : `Read the following script naturally. Do not read the word "Script:" or any metadata.\n\nScript:\n`;
-
-  return instruction + dialogueLines.join('\n');
-}
-
-// I3: Two-layer script splitting
-// Layer 1: split at slide boundaries, keeping each chunk ≤ maxChars dialogue chars
-// Layer 2: if a single slide exceeds maxChars, split by Speaker lines within that slide
-// Layer 3: if a single Speaker line exceeds maxChars, throw CHUNK_TOO_LONG
-function splitScriptIntoChunks(script: string, maxChars: number): string[] {
-  const styleMatch = script.match(/^風格[：:][^\n]*/m);
-  const styleLine  = styleMatch ? styleMatch[0] : '';
-
-  // Remove styleLine from script before splitting to avoid duplication in first chunk
-  const scriptWithoutStyle = styleLine
-    ? script.replace(styleLine, '').replace(/^\n+/, '')
-    : script;
-
-  const rawBlocks = scriptWithoutStyle.split(/(?=\n?投影片\s+\d+[：:])/);
-
-  const chunks: string[] = [];
-
-  function pushChunk(lines: string[]) {
-    const content = lines.join('\n').trim();
-    if (content) chunks.push(content);
-  }
-
-  let currentLines: string[] = styleLine ? [styleLine] : [];
-  let currentChars = 0;
-
-  for (const block of rawBlocks) {
-    if (!block.trim()) continue;
-
-    // Skip blocks with no Speaker lines (e.g. leading whitespace blocks)
-    const hasSpeakerLine = /^Speaker\s+\d+/im.test(block);
-    if (!hasSpeakerLine) continue;
-
-    const blockSpeakerLines = block
-      .split('\n')
-      .filter(l => /^Speaker\s+\d+/i.test(l.trim()));
-
-    const blockChars = blockSpeakerLines
-      .map(l => l.replace(/^Speaker\s+\d+\s*(\([^)]*\))?\s*:\s*/i, '').trim())
-      .reduce((sum, l) => sum + l.length, 0);
-
-    // Layer 1: whole slide fits within limit
-    if (blockChars <= maxChars) {
-      if (currentChars + blockChars > maxChars && currentChars > 0) {
-        pushChunk(currentLines);
-        currentLines = styleLine ? [styleLine] : [];
-        currentChars = 0;
-      }
-      currentLines.push(block);
-      currentChars += blockChars;
-
-    } else {
-      // Layer 2: single slide too long — split by Speaker lines
-      if (currentChars > 0) {
-        pushChunk(currentLines);
-        currentLines = styleLine ? [styleLine] : [];
-        currentChars = 0;
-      }
-
-      // Keep non-Speaker, non-style lines as page header
-      const pageHeader = block
-        .split('\n')
-        .filter(l => !/^Speaker\s+\d+/i.test(l.trim()) && !/^風格[：:]/.test(l.trim()))
-        .join('\n');
-
-      let subLines: string[] = [styleLine, pageHeader].filter(Boolean);
-      let subChars = 0;
-
-      for (const spLine of blockSpeakerLines) {
-        const lineChars = spLine.replace(/^Speaker\s+\d+\s*(\([^)]*\))?\s*:\s*/i, '').trim().length;
-
-        // Layer 3: single sentence exceeds limit — fail fast
-        if (lineChars > maxChars) {
-          throw new Error(`CHUNK_TOO_LONG: 單句台詞超過 ${maxChars} 字，請重新生成較短的腳本。`);
-        }
-
-        if (subChars + lineChars > maxChars && subChars > 0) {
-          pushChunk(subLines);
-          subLines = [styleLine, pageHeader].filter(Boolean);
-          subChars = 0;
-        }
-        subLines.push(spLine);
-        subChars += lineChars;
-      }
-      if (subLines.length > 0) pushChunk(subLines);
-    }
-  }
-
-  if (currentLines.length > (styleLine ? 1 : 0)) pushChunk(currentLines);
-
-  return chunks.length > 0 ? chunks : [script];
 }
 
 // I4: PCM silence trimming — works on Int16 LE PCM data (Uint8Array views)

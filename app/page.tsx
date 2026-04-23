@@ -2013,9 +2013,9 @@ export default function Home() {
                     <div>
                       <div className="flex items-center justify-between mb-1">
                         <label className={labelCls.replace('mb-1', '')}>{isDuo ? 'Voice 1' : 'Voice'}</label>
-                        <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                        <button onClick={() => new Audio(voiceSampleUrl(voice1)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
                       </div>
-                      <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                      <select value={voice1} onChange={e => setVoice1(e.target.value)} className={selectCls}>
                         {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
                       </select>
                     </div>
@@ -2023,9 +2023,9 @@ export default function Home() {
                       <div>
                         <div className="flex items-center justify-between mb-1">
                           <label className={labelCls.replace('mb-1', '')}>Voice 2</label>
-                          <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} disabled={step3State.status === 'loading'} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
+                          <button onClick={() => new Audio(voiceSampleUrl(voice2)).play()} className={`text-[10px] font-bold ${dark ? 'text-emerald-500' : 'text-emerald-700'} hover:opacity-70 disabled:opacity-40`}>▶試聽</button>
                         </div>
-                        <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls} disabled={step3State.status === 'loading'}>
+                        <select value={voice2} onChange={e => setVoice2(e.target.value)} className={selectCls}>
                           {VOICES.map(v => <option key={v.name} value={v.name}>{v.name} — {v.desc}</option>)}
                         </select>
                       </div>
