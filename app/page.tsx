@@ -22,7 +22,7 @@ import {
   resolveTextModelId, resolveStep41ModelId,
   LYRICS_DURATIONS, voiceSampleUrl,
   PODCAST_MAX_FILE_SIZE, MUSIC_MAX_FILE_SIZE, PODCAST_AUDIO_ACCEPT, MUSIC_AUDIO_ACCEPT,
-  TTS_WARN_SEC, TTS_LONG_SEC, TTS_CHUNK_CHARS, CHUNK_GAP_MS,
+  TTS_WARN_SEC, TTS_LONG_SEC, resolveTtsChunkChars, CHUNK_GAP_MS,
   DEFAULT_CONTENT_LANGUAGE, CONTENT_LANGUAGE_OPTIONS,
   DEFAULT_NARRATION_LENGTH_PRESET, NARRATION_LENGTH_PRESETS,
   TRANSITION_COMPENSATION_SEC, MIN_VISIBLE_SLIDE_SEC,
@@ -1996,8 +1996,9 @@ export default function Home() {
             {step3State.status === 'loading'
               ? <LoadingBar message={podcastInputMode === 'api'
                   ? (ttsChunkingEnabled && script && (() => {
-                      const sp = estimateTtsDuration(script, narrationMode);
-                      const pause = Math.max(estimateChunkCount(script, TTS_CHUNK_CHARS) - 1, 0) * (CHUNK_GAP_MS / 1000);
+                      const effectiveChunkChars = resolveTtsChunkChars(contentLanguage);
+                      const sp = estimateTtsDuration(script, narrationMode, contentLanguage);
+                      const pause = Math.max(estimateChunkCount(script, effectiveChunkChars) - 1, 0) * (CHUNK_GAP_MS / 1000);
                       return sp + pause;
                     })() >= TTS_WARN_SEC
                       ? '正在分段生成 TTS 音訊，可能需要較久時間...'
@@ -2044,10 +2045,12 @@ export default function Home() {
                   )}
                   {(() => {
                     if (!script) return null;
-                    // estimateChunkCount is a UI approximation (total chars ÷ TTS_CHUNK_CHARS);
+                    // estimateChunkCount is a UI approximation (total chars ÷ effectiveChunkChars);
                     // actual backend chunk count may differ due to slide boundaries and fallback logic.
-                    const speechSec  = estimateTtsDuration(script, narrationMode);
-                    const chunkCount = estimateChunkCount(script, TTS_CHUNK_CHARS);
+                    // effectiveChunkChars is scaled by content language (plan_B).
+                    const effectiveChunkChars = resolveTtsChunkChars(contentLanguage);
+                    const speechSec  = estimateTtsDuration(script, narrationMode, contentLanguage);
+                    const chunkCount = estimateChunkCount(script, effectiveChunkChars);
                     const pauseSec   = Math.max(chunkCount - 1, 0) * (CHUNK_GAP_MS / 1000);
                     const estSec     = speechSec + (ttsGenerationMode === 'chunked' ? pauseSec : 0);
                     const estMin     = Math.ceil(estSec / 60);

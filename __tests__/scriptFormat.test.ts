@@ -8,6 +8,7 @@ import {
   extractSoloScript,
   splitScriptIntoChunks,
 } from '@/lib/scriptFormat';
+import { resolveTtsChunkChars } from '@/lib/constants';
 
 // --- Fixtures -----------------------------------------------------------
 
@@ -441,4 +442,57 @@ describe('PREAMBLE_LINE_RE', () => {
       expect(PREAMBLE_LINE_RE.test(line)).toBe(false);
     });
   }
+});
+
+// --- resolveTtsChunkChars (plan_B language multiplier) ----------------
+
+describe('resolveTtsChunkChars', () => {
+  it('returns 800 for zh-TW baseline', () => {
+    expect(resolveTtsChunkChars('zh-TW')).toBe(800);
+  });
+  it('returns 2000 for en (2.5x)', () => {
+    expect(resolveTtsChunkChars('en')).toBe(2000);
+  });
+  it('returns 1200 for ja (1.5x)', () => {
+    expect(resolveTtsChunkChars('ja')).toBe(1200);
+  });
+  it('returns 1000 for ko (1.25x)', () => {
+    expect(resolveTtsChunkChars('ko')).toBe(1000);
+  });
+  it('falls back to 800 (zh-TW baseline) when language is undefined', () => {
+    expect(resolveTtsChunkChars(undefined)).toBe(800);
+  });
+});
+
+// --- splitScriptIntoChunks with language-scaled maxChars --------------
+//
+// Regression lock: the same 1800-char script should split into >=3 chunks
+// under the zh-TW baseline (800 chars), but into exactly 1 chunk under the
+// en multiplier (2000 chars). Ensures the chunker responds to the
+// language-aware maxChars passed in by the caller.
+
+describe('splitScriptIntoChunks with language-scaled maxChars', () => {
+  function buildLongDuoScript(totalChars: number): string {
+    // 6 slides × 2 Speakers × ~150 chars each ≈ 1800 chars
+    const perLine = Math.floor(totalChars / 12);
+    const lines: string[] = ['風格: 輕鬆對談', ''];
+    for (let i = 1; i <= 6; i++) {
+      lines.push(`投影片 ${i}：主題 ${i}`);
+      lines.push('Speaker 1: ' + 'a'.repeat(perLine));
+      lines.push('Speaker 2: ' + 'b'.repeat(perLine));
+    }
+    return lines.join('\n');
+  }
+
+  it('zh-TW baseline (maxChars=800): 1800 chars splits into >=3 chunks', () => {
+    const script = buildLongDuoScript(1800);
+    const chunks = splitScriptIntoChunks(script, resolveTtsChunkChars('zh-TW'));
+    expect(chunks.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('en scaled (maxChars=2000): same 1800-char script fits in 1 chunk', () => {
+    const script = buildLongDuoScript(1800);
+    const chunks = splitScriptIntoChunks(script, resolveTtsChunkChars('en'));
+    expect(chunks.length).toBe(1);
+  });
 });

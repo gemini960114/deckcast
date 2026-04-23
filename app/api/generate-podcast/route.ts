@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAI, unauthorizedResponse } from '@/lib/getAI';
-import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel, TTS_CHUNK_CHARS, CHUNK_GAP_MS } from '@/lib/constants';
+import { DEFAULT_VOICE1, DEFAULT_VOICE2, resolveTtsModel, resolveTtsChunkChars, CHUNK_GAP_MS } from '@/lib/constants';
 import { logUsage, getEmailFromRequest } from '@/lib/usageLogger';
 import {
   extractDialogue,
@@ -149,7 +149,6 @@ export async function POST(req: NextRequest) {
     const { script, voice1 = DEFAULT_VOICE1, voice2 = DEFAULT_VOICE2, ttsModel, narrationMode = 'duo', contentLanguage, ttsGenerationMode = 'single' } = await req.json();
     const modelName = resolveTtsModel(ttsModel);
     const isDuo = narrationMode === 'duo';
-    console.log(`[generate-podcast] contentLanguage=${contentLanguage ?? 'zh-TW'} narrationMode=${narrationMode}`);
 
     // I5: User choice drives chunking; env flag acts as server capability guard only.
     // Frontend hides the 'chunked' option when ttsChunkingEnabled=false, so this
@@ -157,10 +156,20 @@ export async function POST(req: NextRequest) {
     const serverAllowsChunking = process.env.TTS_CHUNKING_ENABLED === 'true';
     const chunkingEnabled = ttsGenerationMode === 'chunked' && serverAllowsChunking;
 
+    // plan_B: per-language multiplier so each chunk produces ~145-160s of audio
+    // regardless of contentLanguage. Legacy records without contentLanguage fall
+    // back to 800 (zh-TW baseline).
+    const effectiveChunkChars = resolveTtsChunkChars(contentLanguage);
+    console.log(
+      `[generate-podcast] contentLanguage=${contentLanguage ?? 'zh-TW'} ` +
+      `narrationMode=${narrationMode} ` +
+      `effectiveChunkChars=${effectiveChunkChars}`,
+    );
+
     let chunks: string[];
     try {
       chunks = chunkingEnabled
-        ? splitScriptIntoChunks(script, TTS_CHUNK_CHARS)
+        ? splitScriptIntoChunks(script, effectiveChunkChars)
         : [script];
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
