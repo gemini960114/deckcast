@@ -1,4 +1,5 @@
 import type { SrtEntry, SrtSlideCue } from './types';
+import { PREAMBLE_LINE_RE } from './scriptFormat';
 
 export interface SrtValidationResult {
   valid: boolean;
@@ -153,8 +154,12 @@ export function buildFallbackSrtEntriesFromLyrics(lyrics: string): SrtEntry[] {
       .map(line => line.trim())
       .filter(line => line)
       .filter(line => !/^\[(slide|verse|chorus|bridge|outro|intro)/i.test(line))
+      // Podcast-style preamble markers (風格: / # AUDIO PROFILE / Style: / …)
+      // and 投影片 markers — defense-in-depth in case podcast script fragments
+      // leak into lyrics fallback.
+      .filter(line => !PREAMBLE_LINE_RE.test(line))
+      // Lyrics-specific metadata (song header fields).
       .filter(line => !line.startsWith('歌曲名稱：'))
-      .filter(line => !line.startsWith('風格：'))
       .filter(line => !line.startsWith('總時長：'))
       .filter(line => !line.startsWith('節奏：'))
       .filter(line => !line.startsWith('關鍵元素：'))

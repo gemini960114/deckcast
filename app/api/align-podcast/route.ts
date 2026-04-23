@@ -6,6 +6,7 @@ import { FIND_PODCAST_TRANSITIONS_PROMPT, GENERATE_PODCAST_SRT, REFINE_PODCAST_S
 import { isWhisperConfigured, mapContentLanguageToWhisperLanguage, transcribeAudioWithWhisper } from '@/lib/whisper';
 import type { ContentLanguage } from '@/lib/types';
 import { parseMusicSrtJson, repairSrtEntries, srtEntriesToText } from '@/lib/srt';
+import { PREAMBLE_LINE_RE } from '@/lib/scriptFormat';
 import { buildPodcastFallbackTimingsByScriptWeight, buildSlideCuesFromTransitionMatches, buildSlideTimingsFromSrtIds, normalizeTimings } from '@/lib/timing';
 import type { AlignPodcastDiagnostics, MusicTransitionMatch, SrtEntry, SrtSlideCue } from '@/lib/types';
 import { generateText } from '@/lib/llm';
@@ -94,8 +95,11 @@ function buildFallbackPodcastSrt(script: string): string {
     .split('\n')
     .map(line => line.trim())
     .filter(line => line)
-    .filter(line => !/^風格[:：]/.test(line))
-    .filter(line => !/^投影片\s*\d+[:：]/.test(line))
+    // Strip all preamble markers (legacy 風格:, new AUDIO PROFILE block,
+    // and slide markers) in one shared rule.
+    .filter(line => !PREAMBLE_LINE_RE.test(line))
+    // Speaker-name prefixes remain a separate concern — these are per-script
+    // persona tags, not format markers, so they stay in their own filter.
     .filter(line => !/^(speaker\s*\d+|mary老師|阿哲|男聲|女聲)\s*[:：]/i.test(line));
 
   return lines
