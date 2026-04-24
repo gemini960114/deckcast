@@ -127,9 +127,32 @@ export function getActiveExports(): number {
 
 // ─── Subtitle helpers ────────────────────────────────────────────────────────
 
-// YouTube-style subtitle: semi-transparent black background, system CJK font
-const SUBTITLE_STYLE =
-  'Fontname=Noto Sans CJK TC,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0,Fontsize=22';
+// ASS Alpha in force_style is &HAA…… where 00=opaque, FF=fully transparent.
+// Feature goal: give viewers options to reduce the subtitle banner blocking slide content.
+//   opaque      → &HB0 (≈31% opaque visual) — preserves the original behaviour; default
+//   translucent → &HF8 (≈2% opaque visual) + white text with black outline for readability
+//   outline     → no background box; white text with thin black outline, no shadow
+export type SubtitleStyle = 'opaque' | 'translucent' | 'outline';
+
+export const DEFAULT_SUBTITLE_STYLE: SubtitleStyle = 'opaque';
+
+export function buildSubtitleStyle(variant: SubtitleStyle = DEFAULT_SUBTITLE_STYLE): string {
+  const base = 'Fontname=Noto Sans CJK TC,Fontsize=22';
+  switch (variant) {
+    case 'outline':
+      // No background box: white text with a thin black outline, no drop shadow.
+      // BorderStyle=1 = outline + shadow; setting Shadow=0 removes the shadow.
+      return `${base},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0`;
+    case 'translucent':
+      // Nearly invisible backing (Alpha=&HF8 ≈ 2% opaque) plus a white-on-black
+      // text outline so the subtitle stays readable even on light slides.
+      return `${base},PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HF8000000,BorderStyle=3,Outline=1,Shadow=0`;
+    case 'opaque':
+    default:
+      // Preserve original behaviour (Alpha=&HB0 — already ~69% transparent).
+      return `${base},BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0`;
+  }
+}
 
 // FFmpeg subtitles filter requires forward slashes and escaped colons on Windows
 function escapeSrtPath(p: string): string {
@@ -148,11 +171,12 @@ function buildConcatArgs(
   threads: number,
   outputPath: string,
   srtPath: string | null = null,
+  subtitleStyle: SubtitleStyle = DEFAULT_SUBTITLE_STYLE,
 ): string[] {
   const threadArgs = threads > 0 ? ['-threads', String(threads), '-filter_threads', String(threads)] : [];
   const scale = `scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black`;
   const vf = srtPath
-    ? `${scale},subtitles='${escapeSrtPath(srtPath)}':force_style='${SUBTITLE_STYLE}'`
+    ? `${scale},subtitles='${escapeSrtPath(srtPath)}':force_style='${buildSubtitleStyle(subtitleStyle)}'`
     : scale;
   return [
     '-y',
@@ -194,6 +218,7 @@ function buildXfadeArgs(
   threads: number,
   outputPath: string,
   srtPath: string | null = null,
+  subtitleStyle: SubtitleStyle = DEFAULT_SUBTITLE_STYLE,
 ): string[] {
   const n = timings.length;
 
@@ -256,7 +281,7 @@ function buildXfadeArgs(
 
   if (srtPath) {
     filterParts.push(
-      `${xfadeOutTag}subtitles='${escapeSrtPath(srtPath)}':force_style='${SUBTITLE_STYLE}'[vout]`,
+      `${xfadeOutTag}subtitles='${escapeSrtPath(srtPath)}':force_style='${buildSubtitleStyle(subtitleStyle)}'[vout]`,
     );
   }
 
@@ -285,6 +310,7 @@ export interface GenerateVideoParams {
   resolution?: '720p' | '1080p';
   srtText?: string;         // raw SRT content for hard-coded subtitle burn-in
   burnSubs?: boolean;       // if true + srtText provided, burn subtitles into video
+  subtitleStyle?: SubtitleStyle; // visual style for burned-in subtitles (default: opaque)
 }
 
 export async function generateVideo(params: GenerateVideoParams): Promise<ArrayBuffer> {
@@ -330,9 +356,10 @@ export async function generateVideo(params: GenerateVideoParams): Promise<ArrayB
     const threads = getFFmpegThreads();
 
     const useFade = params.transition === 'fade' && params.timings.length > 1;
+    const subtitleStyle = params.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
     const ffmpegArgs = useFade
-      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath)
-      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath);
+      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath, subtitleStyle)
+      : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath, subtitleStyle);
 
     console.log(
       `[VideoExport] Starting FFmpeg: ${params.images.length} slides, ` +

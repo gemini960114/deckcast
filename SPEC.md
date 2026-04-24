@@ -2,6 +2,18 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v24 補充亮點（2026-04-24，字幕外觀三選一）：
+1. **`SubtitleStyle` 型別**（`lib/videoExport.ts`）：`'opaque' | 'translucent' | 'outline'`；`DEFAULT_SUBTITLE_STYLE = 'opaque'` 保留現況不改變老客戶行為。
+2. **`buildSubtitleStyle(variant)` function 取代舊 `SUBTITLE_STYLE` 常數**：
+   - `opaque` → `Fontname=Noto Sans CJK TC,Fontsize=22,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0`（與 v21 相同）
+   - `translucent` → `Fontname=Noto Sans CJK TC,Fontsize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HF8000000,BorderStyle=3,Outline=1,Shadow=0`（~2% 不透明 + 白字黑邊）
+   - `outline` → `Fontname=Noto Sans CJK TC,Fontsize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0`（無 banner、純白字黑邊）
+3. **`GenerateVideoParams` 新增 `subtitleStyle?: SubtitleStyle`**；`buildConcatArgs` / `buildXfadeArgs` 皆透傳並在 filter 中以 `force_style='${buildSubtitleStyle(variant)}'` 套用。
+4. **`/api/export-video` 接收並驗證 `subtitleStyle`**：新增 `SUBTITLE_STYLES` readonly 陣列 + `isSubtitleStyle()` runtime guard，合法值才傳給 `generateVideo()`，非法值 fallback 到 `undefined`（即 `opaque`）。
+5. **`VideoExportBlock.tsx` UI 新增「字幕外觀」select**：勾選「燒入字幕」後才顯示；state 為 `useState<SubtitleStyle>('opaque')`；每個選項附一行說明文字（`SUBTITLE_STYLE_HINT` map）。切換樣式時呼叫 `onClearCache()`，確保不同樣式之間不共用快取。
+6. **Request payload 追加 `subtitleStyle`**：`burnSubs && hasSrt` 為 true 時才傳；否則不送欄位，維持 API 向下相容。
+7. **設計決策**：預設保留 `opaque` 不改預設，避免現有客戶視覺被動改變；抱怨字幕 banner 遮住投影片的客戶會主動切換為 `translucent` 或 `outline`。
+
 ### ✨ v23 補充亮點（2026-04-19，Plan I 外部上傳音檔標準化 + Plan H seek/play 時序修正）：
 1. **外部上傳 Podcast 音檔條件式標準化（Plan I）**：上傳 wav / m4a / aac 時，前端自動將音檔 POST 至新 API `/api/normalize-podcast-audio`，由後端 FFmpeg 轉成標準 MP3（mono / 24000 Hz / 128 kbps）後回傳；mp3 來源不重編碼，直接使用原始檔；播放器、字幕確認、對齊三者均使用同一份標準化後 blob，消除外部音檔格式差異造成的 seek 不穩定問題。
 2. **新增 `app/api/normalize-podcast-audio/route.ts`**：接收 `{ audioBase64, mimeType }`，呼叫系統 ffmpeg（Docker/Cloud Run 已內建，無需額外安裝），`finally` 區塊確保 tmp 暫存檔一定清除；轉檔失敗直接回 500 明確錯誤，不 silently fallback；`maxDuration=120` 防超時。
@@ -1839,11 +1851,15 @@ concat 模式：-vf "subtitles='...':force_style='...'"
 xfade 模式：filter_complex 末段 [vxf] → subtitles filter → [vout]
 ```
 
-**字型樣式（`SUBTITLE_STYLE`）：**
-```
-Fontname=Noto Sans CJK TC,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0,Fontsize=22
-```
-`BorderStyle=3` = 不透明背景矩形；`BackColour=&HB0000000` = 半透明黑底（ABGR）。
+**字型樣式（`buildSubtitleStyle(variant)`，v24 起以 function 取代舊 `SUBTITLE_STYLE` 常數）：**
+
+| variant | force_style | 視覺 |
+|---|---|---|
+| `opaque`（預設） | `Fontname=Noto Sans CJK TC,Fontsize=22,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0` | v21 的半透明黑底 banner，可讀性最高 |
+| `translucent` | `Fontname=Noto Sans CJK TC,Fontsize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&HF8000000,BorderStyle=3,Outline=1,Shadow=0` | 底幾乎不存在（Alpha=&HF8 ≈ 2% 不透明）＋白字黑邊維持可讀性 |
+| `outline` | `Fontname=Noto Sans CJK TC,Fontsize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=1,Shadow=0` | 無 banner、純白字黑邊；淺色/純色簡報最乾淨 |
+
+ASS Alpha 提示：`&HAA……` 中 `00` = 完全不透明、`FF` = 完全透明；`&HB0`≈31%、`&HF8`≈2%。`BorderStyle=1` 僅描邊＋陰影；`BorderStyle=3` 才是背景矩形。
 
 **Docker 字型：**
 runner stage 安裝 `fontconfig font-noto-cjk`，確保繁中字幕不缺字。
@@ -1854,6 +1870,11 @@ runner stage 安裝 `fontconfig font-noto-cjk`，確保繁中字幕不缺字。
 | `srtText` | `string \| null \| undefined` | SRT 內容；有值才顯示 checkbox |
 | `cachedFilename` | `string \| null \| undefined` | 快取影片的實際檔名（含 `.subbed` 後綴） |
 | `onCached` | `(blob: Blob, filename: string) => void` | 快取完成回調，同時回傳實際檔名 |
+
+**v24 新增內部 state**（`VideoExportBlock.tsx`）：
+- `subtitleStyle: SubtitleStyle`（`useState<SubtitleStyle>('opaque')`）— 使用者選擇的字幕外觀；切換時呼叫 `onClearCache()` 清除快取，避免下載到舊樣式版本
+- `SUBTITLE_STYLE_HINT: Record<SubtitleStyle, string>` — 每個選項的中文提示文字；select 下方動態渲染
+- select 僅在 `burnSubs === true` 時渲染；未勾選燒字幕時欄位完全隱藏，避免干擾預設流程
 
 ### 28.6 環境變數
 

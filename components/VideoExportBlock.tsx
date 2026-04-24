@@ -23,9 +23,17 @@ interface VideoExportBlockProps {
 }
 
 type ExportStatus = 'idle' | 'rendering' | 'uploading' | 'waiting' | 'error';
+type SubtitleStyle = 'opaque' | 'translucent' | 'outline';
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 10_000;
+const SUBTITLE_STYLE_DEFAULT: SubtitleStyle = 'opaque';
+
+const SUBTITLE_STYLE_HINT: Record<SubtitleStyle, string> = {
+  opaque: '預設樣式：深色半透明底色，在任何背景下字幕都最清楚。',
+  translucent: '幾乎無底色，搭配白字黑邊維持可讀性。畫面最不被遮擋。',
+  outline: '無底色，使用白字＋黑色描邊。淺色／純色簡報建議使用，花色背景可能較難閱讀。',
+};
 
 function blobToBase64(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -69,6 +77,7 @@ export default function VideoExportBlock({
   const [forceRegen, setForceRegen] = useState(false);
   const [retryCount, setRetryCount] = useState(0);
   const [burnSubs, setBurnSubs] = useState(false);
+  const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(SUBTITLE_STYLE_DEFAULT);
   const hasSrt = Boolean(srtText);
 
   useEffect(() => {
@@ -108,6 +117,7 @@ export default function VideoExportBlock({
           resolution: '1080p',
           burnSubs: burnSubs && hasSrt,
           srtText: burnSubs && hasSrt ? srtText : undefined,
+          subtitleStyle: burnSubs && hasSrt ? subtitleStyle : undefined,
         });
 
         // 503 = server busy → auto-retry with delay
@@ -241,6 +251,28 @@ export default function VideoExportBlock({
           <p className={`text-[10px] ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
             未勾選時會輸出純畫面影片，字幕仍可另外下載 `.srt`。
           </p>
+          {burnSubs && (
+            <div className={`mt-2 space-y-1 ${status !== 'idle' ? 'opacity-40 pointer-events-none' : ''}`}>
+              <label className={`block text-[10px] font-semibold ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
+                字幕外觀
+              </label>
+              <select
+                value={subtitleStyle}
+                onChange={e => {
+                  setSubtitleStyle(e.target.value as SubtitleStyle);
+                  onClearCache();
+                }}
+                className={`text-[11px] rounded-lg border px-2 py-1 ${dark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-700'}`}
+              >
+                <option value="opaque">深色底（預設）</option>
+                <option value="translucent">半透明底</option>
+                <option value="outline">描邊樣式（無底色）</option>
+              </select>
+              <p className={`text-[10px] ${dark ? 'text-slate-500' : 'text-slate-400'}`}>
+                {SUBTITLE_STYLE_HINT[subtitleStyle]}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

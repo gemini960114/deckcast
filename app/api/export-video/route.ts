@@ -7,8 +7,14 @@ import {
   getMaxConcurrentExports,
   isVideoExportEnabled,
   type GenerateVideoParams,
+  type SubtitleStyle,
 } from '@/lib/videoExport';
 import type { SlideTimings } from '@/lib/types';
+
+const SUBTITLE_STYLES: readonly SubtitleStyle[] = ['opaque', 'translucent', 'outline'] as const;
+function isSubtitleStyle(v: unknown): v is SubtitleStyle {
+  return typeof v === 'string' && (SUBTITLE_STYLES as readonly string[]).includes(v);
+}
 
 export const maxDuration = 600; // 10 minutes — FFmpeg encoding can be slow
 
@@ -24,6 +30,7 @@ interface ExportVideoRequest {
   resolution?: '720p' | '1080p';
   srtText?: string;
   burnSubs?: boolean;
+  subtitleStyle?: SubtitleStyle;
 }
 
 export async function POST(req: NextRequest) {
@@ -114,6 +121,7 @@ export async function POST(req: NextRequest) {
     resolution: body.resolution ?? '1080p',
     srtText: body.burnSubs ? (body.srtText ?? undefined) : undefined,
     burnSubs: body.burnSubs === true && !!body.srtText,
+    subtitleStyle: isSubtitleStyle(body.subtitleStyle) ? body.subtitleStyle : undefined,
   };
 
   try {

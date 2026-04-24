@@ -732,3 +732,46 @@
 - **為什麼不做 UI 選項**：使用者不需關心倍率，`contentLanguage` 選單已決定一切；倍率寫死在 compile-time 常數即可
 - **為什麼倍率不寫進 `GenerationRecord`**：`TTS_CHUNK_LANG_MULTIPLIER` 是 build-time 常數而非 per-record 偏好，若未來要調倍率只需改常數，不需資料遷移
 - **為什麼 `estimateChunkCount` 不直接收 language**：保持這個函式做純數學（字數除法），語言解析在呼叫端做；便於單元測試與日後重用
+
+## 30. 2026-04-24 字幕外觀三選一（opaque / translucent / outline）
+
+### 30.1 背景動機
+- 客戶反映匯出 MP4 燒入字幕後，v21 的半透明黑底 banner（`BackColour=&HB0000000, BorderStyle=3`）在多行字幕時遮住投影片下方內容，要求新增選項
+- 評估結論：單一方案（不論完全去底、或僅改透明度）都會犧牲另一類場景的可讀性；改為「保留預設 + 兩個新選項」三選一，預設不改，把主動權交給使用者
+
+### 30.2 後端：`lib/videoExport.ts`
+- [x] **匯出 `SubtitleStyle` 型別**：`'opaque' | 'translucent' | 'outline'`
+- [x] **匯出 `DEFAULT_SUBTITLE_STYLE = 'opaque'`**：保留現況，避免老客戶視覺被動改變
+- [x] **新增 `buildSubtitleStyle(variant): string` function**（取代舊 `SUBTITLE_STYLE` 常數）：
+  - `opaque` → 與 v21 完全相同：`Fontname=Noto Sans CJK TC,Fontsize=22,BackColour=&HB0000000,BorderStyle=3,Outline=1,Shadow=0`
+  - `translucent` → `BackColour=&HF8000000`（~2% 不透明，幾乎只剩極淡薄霧）+ `PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=1`（白字黑邊，撐住可讀性）；`BorderStyle=3` 保留 banner 結構但視覺上幾乎消失
+  - `outline` → `BorderStyle=1,Outline=1,Shadow=0` 完全無底，純白字細黑邊、無陰影
+- [x] **`GenerateVideoParams` 新增 `subtitleStyle?: SubtitleStyle`**：預設 `opaque`；向下相容
+- [x] **`buildConcatArgs` / `buildXfadeArgs` 新增 `subtitleStyle` 參數**：在 `subtitles=` filter 的 `force_style` 改為呼叫 `buildSubtitleStyle(subtitleStyle)`
+- [x] **`generateVideo()` 解構 `params.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE`**：同時傳給 concat / xfade 兩條路徑
+
+### 30.3 API route：`app/api/export-video/route.ts`
+- [x] **import 新增 `SubtitleStyle` 型別**
+- [x] **新增 `SUBTITLE_STYLES = ['opaque', 'translucent', 'outline'] as const` + `isSubtitleStyle(v): v is SubtitleStyle` runtime guard**：防止前端亂送值
+- [x] **`ExportVideoRequest` 新增 `subtitleStyle?: SubtitleStyle`**
+- [x] **`params.subtitleStyle` 條件賦值**：`isSubtitleStyle(body.subtitleStyle) ? body.subtitleStyle : undefined`；非法值 fallback 到 undefined（後端 `generateVideo` 會套預設）
+
+### 30.4 前端：`components/VideoExportBlock.tsx`
+- [x] **新增 `type SubtitleStyle`**（本地重宣告，不從 lib import 以減少 server-side import 滲漏）
+- [x] **`SUBTITLE_STYLE_DEFAULT: SubtitleStyle = 'opaque'`**
+- [x] **`SUBTITLE_STYLE_HINT: Record<SubtitleStyle, string>`** — 三段中文提示文字，動態顯示於 select 下方
+- [x] **新增 `subtitleStyle` state**：`useState<SubtitleStyle>(SUBTITLE_STYLE_DEFAULT)`
+- [x] **API payload 新增 `subtitleStyle: burnSubs && hasSrt ? subtitleStyle : undefined`**：只在有效時傳送
+- [x] **UI select 條件渲染**：僅在 `hasSrt && burnSubs` 時顯示；位於「燒入字幕」checkbox 說明之後
+- [x] **切換樣式時呼叫 `onClearCache()`**：避免快取與當前選項不一致導致下載到舊樣式 MP4
+
+### 30.5 驗證
+- [x] **`npx tsc --noEmit` 通過**（0 errors）
+- [x] **API route runtime guard 防呆**：手改 request 傳非法 `subtitleStyle` 不會壞掉，fallback 到預設 opaque
+
+### 30.6 設計決策
+- **為什麼保留 opaque 為預設**：抱怨客戶是少數但具體；預設變動會造成所有使用者「為什麼字糊掉」的連帶抱怨，切到新選項的使用者會主動操作
+- **為什麼半透明不走「50% 折衷」**：初版設 Alpha=&HD0（18%）後使用者實測仍感覺擋到畫面，改推到 &HF8（2%）同時加白字黑邊，變成「視覺乾淨＋可讀」的混合款，與 outline 定位差異化
+- **為什麼 `translucent` 仍保留 `BorderStyle=3`**：方塊結構雖然視覺上幾乎消失，但仍能維持 libass 的行距 / 字距邏輯，與 `outline` 的 `BorderStyle=1` 浮在畫面上感覺不同；提供兩種不同「無底」的選項給使用者
+- **為什麼不加測試**：這層只是 ASS style 字串組合，沒有演算法；現有 ffmpeg 執行路徑已由 v21 的測試覆蓋
+- **為什麼不用 skill：plan + task 流程**：範圍 < 50 行，只改 4 個檔案，沒有時序/資料遷移/跨模組風險，直接實作比建立規劃文件更省成本

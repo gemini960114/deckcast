@@ -114,6 +114,12 @@
 - **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = 使用者標記的換頁 cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同）；生成 PPTX 後會立即同步 `timings` state，確保使用者刻意捨棄部分投影片時（如 12 頁 PDF 只標 11 個換頁點），MP4 與 PPTX 均只輸出 11 頁，不會多出 PDF 多餘的末頁
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
 - 若已有 SRT，可在匯出前勾選「燒入字幕」，將字幕永久嵌入畫面；未勾選時仍可另外下載 `.srt`
+- **字幕外觀三選一（v24，勾選燒入字幕後顯示）**：
+  - `深色底（預設）`：保留原本行為，半透明深色 banner（ASS `BackColour=&HB0000000, BorderStyle=3`）；任何背景下可讀性最高
+  - `半透明底`：幾乎無底色（`BackColour=&HF8000000`，~2% 不透明），配白字黑邊（`PrimaryColour=&H00FFFFFF, OutlineColour=&H00000000, Outline=1`）維持可讀性；畫面最不被遮擋
+  - `描邊樣式（無底色）`：`BorderStyle=1, Outline=1, Shadow=0`，純白字黑邊、無背景 box；淺色／純色簡報建議使用，花色背景可能較難閱讀
+  - 預設為「深色底（預設）」，避免老客戶升級後視覺變化；切換選項時自動清除影片快取（`onClearCache()`），避免下載到舊版本
+  - API route 端以 runtime guard 驗證 `subtitleStyle` 只接受 `opaque / translucent / outline` 三個合法值，其他值 fallback 到預設
 - 生成後快取於瀏覽器記憶體，同一 session 內可多次下載而不重跑 FFmpeg
 - 點選「重新生成」會立即清除快取並重新合成；「重試」在錯誤後也會直接重跑，無需再次手動點擊
 - 以下情況會自動清除影片快取（需重新匯出）：重新生成或上傳音訊、重跑 Step 4 / Step 7 PPTX 對齊、套用偏移至轉場、載入歷史紀錄或開新專案
