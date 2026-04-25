@@ -311,6 +311,10 @@ function OffsetSelect({ offset, onChange, dark }: { offset: number; onChange: (v
   );
 }
 
+function stripSlideTags(srt: string): string {
+  return srt.replace(/^(\d+)\s+\[slide-\d+\]/gm, '$1');
+}
+
 // ═══════════════════════════════════════════
 export default function Home() {
   type InputMode = 'api' | 'upload';
@@ -366,6 +370,10 @@ export default function Home() {
   const [musicVisualCueTimings, setMusicVisualCueTimings] = useState<VisualCueTiming[] | null>(null);
   const [podcastSrtEntries, setPodcastSrtEntries] = useState<SrtEntry[]>([]);
   const [musicSrtEntries, setMusicSrtEntries] = useState<SrtEntry[]>([]);
+  const podcastSrtEntriesRef = useRef<SrtEntry[]>([]);
+  const musicSrtEntriesRef = useRef<SrtEntry[]>([]);
+  useEffect(() => { podcastSrtEntriesRef.current = podcastSrtEntries; }, [podcastSrtEntries]);
+  useEffect(() => { musicSrtEntriesRef.current = musicSrtEntries; }, [musicSrtEntries]);
   const [podcastSlideCues, setPodcastSlideCues] = useState<SrtSlideCue[]>([]);
   const [musicSlideCues, setMusicSlideCues] = useState<SrtSlideCue[]>([]);
   const [podcastSrtConfirmed, setPodcastSrtConfirmed] = useState(false);
@@ -412,12 +420,16 @@ export default function Home() {
   const t = useTheme(dark);
   const normalizedOwnerEmail = authEnabled ? authEmail.trim().toLowerCase() : undefined;
 
-  const podcastSrtForDownload = podcastSlideCues.length > 0 && podcastSrtEntries.length > 0
+  // slideCues may be [] when entries exist but cue alignment hasn't run yet;
+  // serializeSrtWithSlideTags handles empty cues by emitting plain entry numbers.
+  const podcastSrtForDownload = podcastSrtEntries.length > 0
     ? serializeSrtWithSlideTags(podcastSrtEntries, podcastSlideCues)
     : podcastSrt;
-  const musicSrtForDownload = musicSlideCues.length > 0 && musicSrtEntries.length > 0
+  const musicSrtForDownload = musicSrtEntries.length > 0
     ? serializeSrtWithSlideTags(musicSrtEntries, musicSlideCues)
     : musicSrt;
+  const podcastSrtForBurn = adjustSrtTimes(stripSlideTags(podcastSrtForDownload), podcastSrtOffset);
+  const musicSrtForBurn = adjustSrtTimes(stripSlideTags(musicSrtForDownload), musicSrtOffset);
   const isDuo = narrationMode === 'duo';
   const textModelOptions = localLlmEnabled
     ? TEXT_MODEL_OPTIONS.map(option => option.id === DEFAULT_LOCAL_TEXT_MODEL
@@ -1399,6 +1411,38 @@ export default function Home() {
     }
   }
 
+  function handlePodcastSrtEntryChange(id: number, text: string) {
+    setPodcastSrtEntries(prev => prev.map(e => e.id === id ? { ...e, text } : e));
+  }
+
+  function handlePodcastSrtBlur() {
+    setPodcastPptxBlob(null);
+    setPodcastVideoBlob(null);
+    if (recordId) {
+      void updateRecord(recordId, {
+        podcastSrtEntries: podcastSrtEntriesRef.current,
+        podcastPptxBlob: undefined,
+        podcastVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
+  function handleMusicSrtEntryChange(id: number, text: string) {
+    setMusicSrtEntries(prev => prev.map(e => e.id === id ? { ...e, text } : e));
+  }
+
+  function handleMusicSrtBlur() {
+    setMusicPptxBlob(null);
+    setMusicVideoBlob(null);
+    if (recordId) {
+      void updateRecord(recordId, {
+        musicSrtEntries: musicSrtEntriesRef.current,
+        musicPptxBlob: undefined,
+        musicVideoBlob: undefined,
+      }, normalizedOwnerEmail);
+    }
+  }
+
   function loadRecord(rec: GenerationRecord) {
     setContentLanguage(rec.contentLanguage ?? DEFAULT_CONTENT_LANGUAGE);
     setNarrationMode(rec.narrationMode ?? 'duo');
@@ -2144,6 +2188,8 @@ export default function Home() {
                   onRealign={runAlignPodcast}
                   realigning={step4State.status === 'loading'}
                   dark={dark}
+                  onEntryTextChange={handlePodcastSrtEntryChange}
+                  onEntryBlur={handlePodcastSrtBlur}
                 />
                 {podcastSrtConfirmed && (
                   <>
@@ -2207,7 +2253,7 @@ export default function Home() {
             onClearCache={() => setPodcastVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
-            srtText={podcastSrt}
+            srtText={podcastSrtForBurn}
           />
         )}
 
@@ -2386,6 +2432,8 @@ export default function Home() {
                   onRealign={runAlignMusic}
                   realigning={step7State.status === 'loading'}
                   dark={dark}
+                  onEntryTextChange={handleMusicSrtEntryChange}
+                  onEntryBlur={handleMusicSrtBlur}
                 />
                 {musicSrtConfirmed && (
                   <>
@@ -2449,7 +2497,7 @@ export default function Home() {
             onClearCache={() => setMusicVideoBlob(null)}
             dark={dark}
             videoExportEnabled={videoExportEnabled}
-            srtText={musicSrt}
+            srtText={musicSrtForBurn}
           />
         )}
 

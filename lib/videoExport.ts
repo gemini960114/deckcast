@@ -159,6 +159,26 @@ function escapeSrtPath(p: string): string {
   return p.replace(/\\/g, '/').replace(/:/g, '\\:');
 }
 
+// ─── Transition helpers ──────────────────────────────────────────────────────
+
+export type VideoTransition =
+  | 'fade' | 'fadeblack'
+  | 'slideleft' | 'slideright'
+  | 'smoothleft' | 'smoothright'
+  | 'random' | 'none';
+
+export const VIDEO_TRANSITIONS: readonly VideoTransition[] = [
+  'fade', 'fadeblack', 'slideleft', 'slideright', 'smoothleft', 'smoothright', 'random',
+];
+
+const RANDOM_POOL: readonly string[] = ['fade', 'fadeblack', 'smoothleft', 'smoothright'];
+
+function resolveTransition(t: VideoTransition | undefined): string {
+  if (!t || t === 'none') return 'fade';
+  if (t === 'random') return RANDOM_POOL[Math.floor(Math.random() * RANDOM_POOL.length)]!;
+  return t;
+}
+
 // ─── FFmpeg arg builders ─────────────────────────────────────────────────────
 
 function buildConcatArgs(
@@ -219,7 +239,9 @@ function buildXfadeArgs(
   outputPath: string,
   srtPath: string | null = null,
   subtitleStyle: SubtitleStyle = DEFAULT_SUBTITLE_STYLE,
+  transition: VideoTransition = 'fade',
 ): string[] {
+  const xfadeTransition = resolveTransition(transition);
   const n = timings.length;
 
   // Pre-compute all fade durations first — needed for last-slide extension.
@@ -275,7 +297,7 @@ function buildXfadeArgs(
     const outputTag = i === n - 2 ? xfadeOutTag : `[xf${i}]`;
 
     filterParts.push(
-      `${inputA}${inputB}xfade=transition=fade:duration=${fadeDur.toFixed(3)}:offset=${offset.toFixed(3)}${outputTag}`,
+      `${inputA}${inputB}xfade=transition=${xfadeTransition}:duration=${fadeDur.toFixed(3)}:offset=${offset.toFixed(3)}${outputTag}`,
     );
   }
 
@@ -306,7 +328,7 @@ export interface GenerateVideoParams {
   timings: SlideTimings;
   audioBase64: string;
   audioMimeType: string;
-  transition?: 'fade' | 'none';
+  transition?: VideoTransition;
   resolution?: '720p' | '1080p';
   srtText?: string;         // raw SRT content for hard-coded subtitle burn-in
   burnSubs?: boolean;       // if true + srtText provided, burn subtitles into video
@@ -355,10 +377,10 @@ export async function generateVideo(params: GenerateVideoParams): Promise<ArrayB
     const preset = getFFmpegPreset();
     const threads = getFFmpegThreads();
 
-    const useFade = params.transition === 'fade' && params.timings.length > 1;
+    const useXfade = params.transition !== 'none' && params.timings.length > 1;
     const subtitleStyle = params.subtitleStyle ?? DEFAULT_SUBTITLE_STYLE;
-    const ffmpegArgs = useFade
-      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath, subtitleStyle)
+    const ffmpegArgs = useXfade
+      ? buildXfadeArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath, subtitleStyle, params.transition ?? 'fade')
       : buildConcatArgs(workDir, params.timings, audioPath, width, height, preset, threads, outputPath, srtPath, subtitleStyle);
 
     console.log(

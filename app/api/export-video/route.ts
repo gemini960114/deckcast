@@ -6,14 +6,20 @@ import {
   getActiveExports,
   getMaxConcurrentExports,
   isVideoExportEnabled,
+  VIDEO_TRANSITIONS,
   type GenerateVideoParams,
   type SubtitleStyle,
+  type VideoTransition,
 } from '@/lib/videoExport';
 import type { SlideTimings } from '@/lib/types';
 
 const SUBTITLE_STYLES: readonly SubtitleStyle[] = ['opaque', 'translucent', 'outline'] as const;
 function isSubtitleStyle(v: unknown): v is SubtitleStyle {
   return typeof v === 'string' && (SUBTITLE_STYLES as readonly string[]).includes(v);
+}
+
+function isVideoTransition(v: unknown): v is VideoTransition {
+  return typeof v === 'string' && (VIDEO_TRANSITIONS as readonly string[]).includes(v);
 }
 
 export const maxDuration = 600; // 10 minutes — FFmpeg encoding can be slow
@@ -26,7 +32,7 @@ interface ExportVideoRequest {
   timings: SlideTimings;
   audioBase64: string;
   audioMimeType: string;
-  transition?: 'fade' | 'none';
+  transition?: VideoTransition;
   resolution?: '720p' | '1080p';
   srtText?: string;
   burnSubs?: boolean;
@@ -117,7 +123,7 @@ export async function POST(req: NextRequest) {
     timings: body.timings,
     audioBase64: body.audioBase64,
     audioMimeType: body.audioMimeType,
-    transition: body.transition,
+    transition: isVideoTransition(body.transition) ? body.transition : 'fade',
     resolution: body.resolution ?? '1080p',
     srtText: body.burnSubs ? (body.srtText ?? undefined) : undefined,
     burnSubs: body.burnSubs === true && !!body.srtText,

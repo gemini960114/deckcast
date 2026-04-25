@@ -24,10 +24,23 @@ interface VideoExportBlockProps {
 
 type ExportStatus = 'idle' | 'rendering' | 'uploading' | 'waiting' | 'error';
 type SubtitleStyle = 'opaque' | 'translucent' | 'outline';
+type VideoTransition = 'fade' | 'fadeblack' | 'slideleft' | 'slideright' | 'smoothleft' | 'smoothright' | 'random' | 'none';
 
 const MAX_RETRIES = 5;
 const RETRY_DELAY_MS = 10_000;
 const SUBTITLE_STYLE_DEFAULT: SubtitleStyle = 'opaque';
+const TRANSITION_DEFAULT: VideoTransition = 'fade';
+
+const TRANSITION_OPTIONS: { value: VideoTransition; label: string }[] = [
+  { value: 'fade',        label: '淡入淡出（預設）' },
+  { value: 'fadeblack',   label: '過黑' },
+  { value: 'slideleft',   label: '硬推左' },
+  { value: 'slideright',  label: '硬推右' },
+  { value: 'smoothleft',  label: '柔和左移' },
+  { value: 'smoothright', label: '柔和右移' },
+  { value: 'random',      label: '隨機（淡入/過黑/柔和左右）' },
+  { value: 'none',        label: '無轉場' },
+];
 
 const SUBTITLE_STYLE_HINT: Record<SubtitleStyle, string> = {
   opaque: '預設樣式：深色半透明底色，在任何背景下字幕都最清楚。',
@@ -78,6 +91,7 @@ export default function VideoExportBlock({
   const [retryCount, setRetryCount] = useState(0);
   const [burnSubs, setBurnSubs] = useState(false);
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyle>(SUBTITLE_STYLE_DEFAULT);
+  const [transition, setTransition] = useState<VideoTransition>(TRANSITION_DEFAULT);
   const hasSrt = Boolean(srtText);
 
   useEffect(() => {
@@ -113,7 +127,7 @@ export default function VideoExportBlock({
           timings,
           audioBase64,
           audioMimeType: audioBlob.type || 'audio/wav',
-          transition: 'fade',
+          transition,
           resolution: '1080p',
           burnSubs: burnSubs && hasSrt,
           srtText: burnSubs && hasSrt ? srtText : undefined,
@@ -230,6 +244,24 @@ export default function VideoExportBlock({
             將簡報轉換為 MP4，可上傳 YouTube 或本地播放。
           </p>
         </div>
+      </div>
+
+      <div className={`mb-3 ${status !== 'idle' ? 'opacity-40 pointer-events-none' : ''}`}>
+        <label className={`block text-[10px] font-semibold mb-1 ${dark ? 'text-slate-400' : 'text-slate-500'}`}>
+          轉場效果
+        </label>
+        <select
+          value={transition}
+          onChange={e => {
+            setTransition(e.target.value as VideoTransition);
+            onClearCache();
+          }}
+          className={`text-[11px] rounded-lg border px-2 py-1 ${dark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-300 text-slate-700'}`}
+        >
+          {TRANSITION_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
       </div>
 
       {hasSrt && (

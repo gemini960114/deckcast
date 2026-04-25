@@ -1775,7 +1775,44 @@ export function getMaxConcurrentExports(): number {
 
 ### 28.3 xfade 轉場
 
-`transition='fade'` 且投影片數 > 1 時使用 `buildXfadeArgs()`，否則使用 `buildConcatArgs()`（concat demuxer）。
+**`VideoTransition` 型別與選項：**
+
+```ts
+export type VideoTransition =
+  | 'fade' | 'fadeblack'
+  | 'slideleft' | 'slideright'
+  | 'smoothleft' | 'smoothright'
+  | 'random' | 'none';
+```
+
+| 值 | 說明 |
+|---|---|
+| `fade`（預設） | 交叉淡入淡出 |
+| `fadeblack` | 先淡出到黑色再淡入 |
+| `slideleft` | 新頁從右側滑入 |
+| `slideright` | 新頁從左側滑入 |
+| `smoothleft` | smoothleft 柔和滑移 |
+| `smoothright` | smoothright 柔和滑移 |
+| `random` | 從 `RANDOM_POOL` 隨機挑選（見下） |
+| `none` | 不使用 xfade，改走 concat demuxer |
+
+**`RANDOM_POOL`**：`['fade', 'fadeblack', 'smoothleft', 'smoothright']`  
+排除 `slideleft` / `slideright`（硬切感強，不適合自動隨機）。
+
+**`resolveTransition(t)`**：
+- `undefined` 或 `'none'` → fallback 到 `'fade'`（concat 路徑由 `useXfade` 判斷，不交給此函式處理）
+- `'random'` → 從 `RANDOM_POOL` 隨機挑一個
+- 其他有效值 → 直接回傳
+
+**API 邊界驗證**（`app/api/export-video/route.ts`）：
+- `VIDEO_TRANSITIONS` 陣列不含 `'none'`（concat 路徑在 backend 以 `params.transition !== 'none'` 判斷）
+- `isVideoTransition(v)` guard 僅通過 `VIDEO_TRANSITIONS` 中的值；非法值 fallback 到 `'fade'`
+
+**前端選單**（`components/VideoExportBlock.tsx`）：
+- `TRANSITION_OPTIONS`：8 項（含 `none`）顯示於影片匯出卡片中
+- 預設 `TRANSITION_DEFAULT = 'fade'`
+
+`transition !== 'none'` 且投影片數 > 1 時使用 `buildXfadeArgs()`，否則使用 `buildConcatArgs()`（concat demuxer）。
 
 **時序計算（plan_K 修正版）：**
 ```
@@ -1875,6 +1912,92 @@ runner stage 安裝 `fontconfig font-noto-cjk`，確保繁中字幕不缺字。
 - `subtitleStyle: SubtitleStyle`（`useState<SubtitleStyle>('opaque')`）— 使用者選擇的字幕外觀；切換時呼叫 `onClearCache()` 清除快取，避免下載到舊樣式版本
 - `SUBTITLE_STYLE_HINT: Record<SubtitleStyle, string>` — 每個選項的中文提示文字；select 下方動態渲染
 - select 僅在 `burnSubs === true` 時渲染；未勾選燒字幕時欄位完全隱藏，避免干擾預設流程
+
+### 28.7 SRT 字幕直接編輯（SrtReviewPanel inline editing）
+
+**功能說明：**
+`SrtReviewPanel` 顯示的每一行字幕文字可直接點擊修改，時間軸不可調整。編輯完成後點擊面板外自動儲存，清除舊的 PPTX / 影片快取。
+
+**元件設計（`components/SrtReviewPanel.tsx`）：**
+
+```tsx
+const AutoResizeTextarea = React.memo(function AutoResizeTextarea({
+  value, onChange, className,
+}) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, [value]);
+  return (
+    <textarea ref={ref} value={value} rows={1}
+      onChange={(e) => onChange(e.target.value)}
+      onClick={(e) => e.stopPropagation()}  // 防止觸發 seekTo
+      className={className} />
+  );
+});
+```
+
+- `React.memo` 避免無關 entry 重繪
+- `useLayoutEffect` 依 `value` 變化自動撐高 textarea
+- `onClick stopPropagation` 防止點擊 textarea 觸發 `seekTo`
+
+**props（`SrtReviewPanelProps`）：**
+
+| prop | 型別 | 說明 |
+|------|------|------|
+| `onEntryTextChange?` | `(id: number, text: string) => void` | 每次 keystroke 時更新 state |
+| `onEntryBlur?` | `() => void` | 焦點離開整個 list 時觸發（清快取 + DB 寫入） |
+
+**blur 架構：**
+移除每個 `AutoResizeTextarea` 個別的 `onBlur`，改在 list wrapper div 統一攔截，用 `relatedTarget instanceof Node` 判斷焦點是否離開容器範圍：
+
+```tsx
+onBlur={(e) => {
+  if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) {
+    onEntryBlur?.();
+  }
+}}
+```
+
+在 entry 間切換焦點時不觸發；只有焦點完全離開 list（如點擊面板外）才觸發 `onEntryBlur`。
+
+**stale-closure-safe 設計（`app/page.tsx`）：**
+
+```ts
+const podcastSrtEntriesRef = useRef<SrtEntry[]>([]);
+const musicSrtEntriesRef = useRef<SrtEntry[]>([]);
+useEffect(() => { podcastSrtEntriesRef.current = podcastSrtEntries; }, [podcastSrtEntries]);
+useEffect(() => { musicSrtEntriesRef.current = musicSrtEntries; }, [musicSrtEntries]);
+```
+
+`handlePodcastSrtBlur` / `handleMusicSrtBlur` 透過 ref 讀取最新 entries，不因 setState closure 而讀到舊版本。
+
+**ForBurn 衍生值：**
+
+```ts
+function stripSlideTags(srt: string): string {
+  return srt.replace(/^(\d+)\s+\[slide-\d+\]/gm, '$1');
+}
+const podcastSrtForBurn = adjustSrtTimes(stripSlideTags(podcastSrtForDownload), podcastSrtOffset);
+const musicSrtForBurn   = adjustSrtTimes(stripSlideTags(musicSrtForDownload), musicSrtOffset);
+```
+
+- `stripSlideTags` 為 module-level function（無 `i` flag，sequence number 固定大小寫）
+- `VideoExportBlock` 的 `srtText` 改用 `ForBurn` 版，確保 `[slide-N]` 不出現在燒入畫面
+- SRT 下載仍保留原始 `serializeSrtWithSlideTags` 版本（含換頁標記）
+
+**`handleEntryChange` callback 穩定化：**
+
+```ts
+const handleEntryChange = useCallback((id: number, text: string) => {
+  onEntryTextChange?.(id, text);
+}, [onEntryTextChange]);
+```
+
+以 `useCallback` 穩定化，配合 `React.memo` 減少不必要的 `AutoResizeTextarea` 重繪。
 
 ### 28.6 環境變數
 

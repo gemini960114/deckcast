@@ -775,3 +775,76 @@
 - **為什麼 `translucent` 仍保留 `BorderStyle=3`**：方塊結構雖然視覺上幾乎消失，但仍能維持 libass 的行距 / 字距邏輯，與 `outline` 的 `BorderStyle=1` 浮在畫面上感覺不同；提供兩種不同「無底」的選項給使用者
 - **為什麼不加測試**：這層只是 ASS style 字串組合，沒有演算法；現有 ffmpeg 執行路徑已由 v21 的測試覆蓋
 - **為什麼不用 skill：plan + task 流程**：範圍 < 50 行，只改 4 個檔案，沒有時序/資料遷移/跨模組風險，直接實作比建立規劃文件更省成本
+
+## 31. 2026-04-25 FFmpeg xfade 轉場選項（VideoTransition）
+
+### 31.1 背景動機
+- 只有 `fade` 一種轉場效果；有需求加入其他 xfade 選項（fadeblack / slideleft / slideright / smoothleft / smoothright）
+- 同時加入 `random`（自動輪換）與 `none`（無轉場）兩個特殊模式
+- 預設維持 `fade`，`random` 從安全子集隨機選取
+
+### 31.2 後端：`lib/videoExport.ts`
+- [x] **匯出 `VideoTransition` 型別**：`'fade' | 'fadeblack' | 'slideleft' | 'slideright' | 'smoothleft' | 'smoothright' | 'random' | 'none'`
+- [x] **匯出 `VIDEO_TRANSITIONS`**（不含 `'none'`，供 API guard 使用）
+- [x] **`RANDOM_POOL`**：`['fade', 'fadeblack', 'smoothleft', 'smoothright']`（排除硬切感的 slide 系列）
+- [x] **`resolveTransition(t)`**：`undefined`/`'none'` fallback `'fade'`；`'random'` 隨機取；其他直接回傳
+- [x] **`buildXfadeArgs` 簽名加入 `transition: VideoTransition = 'fade'`**；xfade filter 改用 `resolveTransition()` 展開
+- [x] **`GenerateVideoParams.transition?: VideoTransition`**
+- [x] **`useXfade` 條件**：`params.transition !== 'none' && params.timings.length > 1`
+
+### 31.3 API route：`app/api/export-video/route.ts`
+- [x] **`isVideoTransition(v)`** runtime guard（基於 `VIDEO_TRANSITIONS`）
+- [x] **`transition` 條件賦值**：`isVideoTransition(body.transition) ? body.transition : 'fade'`
+
+### 31.4 前端：`components/VideoExportBlock.tsx`
+- [x] **本地型別 `VideoTransition`**（不從 lib import，避免 server-side import 滲漏）
+- [x] **`TRANSITION_DEFAULT = 'fade'`**；**`TRANSITION_OPTIONS`**：8 項含中文顯示名稱
+- [x] **`transition` state**；select UI 位於影片匯出卡片轉場設定區
+- [x] **API payload 加入 `transition`**
+
+### 31.5 驗證
+- [x] **`npx tsc --noEmit` 通過**（0 errors）
+- [x] **`VideoTransition` 型別與 `none` 的 TypeScript 比較語意**：`VIDEO_TRANSITIONS` 不含 `'none'`，`params.transition !== 'none'` 改為直接字串比較，解決 noOverlap 型別錯誤
+
+### 31.6 設計備註
+- **為什麼 `RANDOM_POOL` 不含 slideleft / slideright**：投影片為靜態 JPEG，兩者在隨機出現時視覺上有強烈硬切感，不適合無法預期的自動模式
+- **為什麼 `VIDEO_TRANSITIONS` 不含 `'none'`**：`'none'` 是「不使用 xfade 的路徑切換」，不是一種 xfade 效果，semantic 上不應出現在轉場名稱清單
+
+## 32. 2026-04-25 SRT 字幕直接編輯還原（plan_A + plan_B）
+
+### 32.1 背景動機
+- commit `03c0ec0` 加入的 SRT inline editing 功能在後續重構中遺失
+- 需要精準還原：`AutoResizeTextarea`、stale-closure-safe refs、`ForBurn` 衍生值、blur 架構
+
+### 32.2 plan_A — 功能還原（`components/SrtReviewPanel.tsx` + `app/page.tsx`）
+- [x] **`AutoResizeTextarea`**：`React.memo` + `useLayoutEffect` 自動撐高 + `onClick stopPropagation`
+- [x] **`SrtReviewPanelProps` 新增 optional props**：`onEntryTextChange` / `onEntryBlur`
+- [x] **list 中 `<span>` 換為 `<AutoResizeTextarea>`**，傳入 `onChange` + className 樣式
+- [x] **提示文字移至 audio player 下方、list 上方**
+- [x] **stale-closure-safe refs**：`podcastSrtEntriesRef` / `musicSrtEntriesRef` + `useEffect` 同步
+- [x] **`podcastSrtForBurn` / `musicSrtForBurn`**：`adjustSrtTimes(stripSlideTags(...), offset)`
+- [x] **`podcastSrtForDownload` / `musicSrtForDownload` 條件簡化**：移除 `slideCues.length > 0 &&`
+- [x] **4 個 handler**：`handlePodcastSrtEntryChange` / `handlePodcastSrtBlur` / `handleMusicSrtEntryChange` / `handleMusicSrtBlur`
+- [x] **兩個 `<SrtReviewPanel>` 傳入 `onEntryTextChange` / `onEntryBlur` props**
+- [x] **兩個 `<VideoExportBlock>` 改用 `srtText={podcastSrtForBurn}` / `srtText={musicSrtForBurn}`**
+
+### 32.3 plan_B — Code Review 修復（HIGH×2、MEDIUM×3、LOW×3）
+- [x] **B1 HIGH**：移除 seek handlers 中 5 個 `console.log`
+- [x] **B2 HIGH**：blur 移至 list wrapper div，用 `relatedTarget instanceof Node` 判斷（防止 entry 間切換誤觸）
+- [x] **B3 MEDIUM**：移除 `setState updater` 內的 `podcastSrtEntriesRef.current = next` / `musicSrtEntriesRef.current = next` ref 賦值（updater 應為純函式）
+- [x] **B4 MEDIUM**：提示文字移至 audio player 下方、list 上方（視覺順序更合理）
+- [x] **B5 MEDIUM**：`podcastSrtForDownload` / `musicSrtForDownload` 條件 comment 說明（`slideCues` 可為 `[]` 時 `serializeSrtWithSlideTags` 仍能正常輸出）
+- [x] **B6 LOW**：`stripSlideTags` regex 移除無用 `i` flag
+- [x] **B7 LOW**：`stripSlideTags` 移到 module level（避免每次 render 重建 lambda）
+- [x] **B8 LOW**：`handleEntryChange` 以 `useCallback` 穩定化；`rowRefs.current.slice(0, srtEntries.length)` 修剪 stale refs
+
+### 32.4 驗證
+- [x] **`npx tsc --noEmit` 通過**（0 errors）
+- [x] entry 間切換不觸發 blur handler
+- [x] 點擊 list 外部才觸發 blur（清快取 + DB 寫入）
+- [x] `[slide-N]` 不出現在燒入字幕畫面
+- [x] setState updater 純函式，無 ref 賦值
+
+### 32.5 設計備註
+- **為什麼 `AutoResizeTextarea` 不接收 `id` prop**：目前 `onChange={(text) => handleEntryChange(entry.id, text)}` 仍為 per-render closure，但 `React.memo` 已緩解大部分重繪；完整消除需讓 textarea 接收 `id` 並在內部組合（可作為後續優化，不影響功能正確性）
+- **為什麼 blur 不清除 `srtConfirmed`**：使用者只是修改字幕文字，確認狀態應保留；清除 pptx/video blob 已足夠觸發下游重生成

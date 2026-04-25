@@ -109,7 +109,11 @@
 ### 影片匯出（MP4）
 
 - 在 Step 4 / Step 7 完成後，可將簡報 + 音訊合成為 MP4 影片
-- 採用 FFmpeg xfade 轉場（`fade` 淡入淡出），與 PPTX 視覺效果一致
+- **FFmpeg xfade 轉場選項（`VideoTransition`）**：匯出前可在 VideoExportBlock 下拉選擇以下 8 種：
+  - `fade`（預設）、`fadeblack`、`slideleft`、`slideright`、`smoothleft`、`smoothright`
+  - `random`：從 `['fade','fadeblack','smoothleft','smoothright']` 隨機挑選（排除硬切感的 slide 系列）
+  - `none`：不使用 xfade，改走 concat demuxer（投影片少或不需要轉場時）
+- 與 PPTX 視覺效果一致（PPTX `<p:fade/>` ↔ MP4 `xfade=transition=fade`）
 - PPTX 與 MP4 共用同一套 `resolveEffectiveTransitionSec()` 計算轉場時長，確保兩者時間語意完全一致：timings 代表「新頁完全可見的時間點」，在 PPTX 與 MP4 均成立
 - **幀數與 cue 一致**：MP4 的影片幀數 = PPTX 投影片張數 = 使用者標記的換頁 cue 數（`buildOrderedImagesFromTimings()` 確保 images 與 timings 長度相同）；生成 PPTX 後會立即同步 `timings` state，確保使用者刻意捨棄部分投影片時（如 12 頁 PDF 只標 11 個換頁點），MP4 與 PPTX 均只輸出 11 頁，不會多出 PDF 多餘的末頁
 - 解析度固定 1080p（1920×1080），H.264 / AAC 編碼，支援直接上傳 YouTube
@@ -135,6 +139,7 @@
 - **歌曲對齊核心設計**：Phase 1 採「lyrics-as-anchor」策略，歌詞文字是唯一正確來源，音訊只負責定位時間。
 - **Podcast 對齊核心設計**：以實際音訊為主、腳本為輔，先修正逐段字幕文字，再對應每張投影片開始的字幕 id。
 - **SRT 優先（SRT-first）人工確認流程**：對齊完成後，Step 4 / Step 7 下方會出現兩階段確認面板——先確認 SRT 字幕內容（`SrtReviewPanel`），再透過 `SrtCueEditor` 手動指定每張投影片的換頁起始字幕列（也可略過，使用 AI 自動對齊結果）；確認後才解鎖「生成 PPTX」按鈕。
+- **SRT 字幕直接編輯**：`SrtReviewPanel` 顯示的每一行字幕文字均可直接點擊修改（`AutoResizeTextarea`）；時間軸不可調整。編輯完成後點擊面板外會自動儲存，並清除舊的 PPTX / 影片快取以便重新生成；`[slide-N]` 標記會在燒入字幕前自動剝除（`podcastSrtForBurn` / `musicSrtForBurn`），不影響 SRT 下載版。
 - **換頁標記縮圖預覽**：在 `SrtCueEditor` 點擊 slide chip 後，下方會即時顯示對應投影片縮圖（16:9，140×79px），方便確認畫面與字幕對應關係；縮圖延遲渲染（首次點擊才觸發），後續切換不重跑。
 - **PPTX / MP4 幀順序跟隨 cue 標記**：PPTX 與 MP4 的幀數均等於 SRT `[slide-N]` 標籤數（cue 數），而非 PDF 頁數；投影片順序依使用者 cue 的 `slideIndex` 重排，支援重複出現或以非 PDF 頁序呈現（`buildOrderedImagesFromTimings()`）。
 - 若 AI 配對失敗或不足，系統仍會退回 `lyrics/script weight fallback` 或均分 fallback，避免流程中斷。
@@ -164,8 +169,8 @@
 | `music.srt` | 音樂字幕 | 音樂對齊完成後 |
 | `podcast.pptx` | Podcast 同步簡報 | Step 4 完成後 |
 | `music.pptx` | 音樂同步簡報 | Step 7 完成後 |
-| `podcast.mp4` / `podcast.subbed.mp4` | Podcast 影片（1080p，含 fade 轉場）；勾選燒入字幕時檔名加 `.subbed` | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
-| `music.mp4` / `music.subbed.mp4` | 音樂影片（1080p，含 fade 轉場）；勾選燒入字幕時檔名加 `.subbed` | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `podcast.mp4` / `podcast.subbed.mp4` | Podcast 影片（1080p，轉場可選 fade/fadeblack/slideleft/slideright/smoothleft/smoothright/random/none）；勾選燒入字幕時檔名加 `.subbed` | Step 4 完成後，需啟用 VIDEO_EXPORT_ENABLED |
+| `music.mp4` / `music.subbed.mp4` | 音樂影片（1080p，轉場可選，同上）；勾選燒入字幕時檔名加 `.subbed` | Step 7 完成後，需啟用 VIDEO_EXPORT_ENABLED |
 
 > **實際下載檔名帶時間戳記**：以上顯示名稱僅為按鈕文字。實際下載的檔案會自動帶上 `_HHmmss` 時間標籤（本地時間），例如 `script_181646.txt`、`podcast_181646.pptx`、`podcast_181646.mp4`。Podcast 系列以文稿生成時間為錨點，音樂系列以歌詞生成時間為錨點。同一工作階段多次下載可安全共存，不會互相覆蓋。
 >

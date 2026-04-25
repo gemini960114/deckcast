@@ -1,7 +1,39 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SrtEntry } from '@/lib/types';
+
+interface AutoResizeTextareaProps {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}
+
+const AutoResizeTextarea = React.memo(function AutoResizeTextarea({
+  value,
+  onChange,
+  className,
+}: AutoResizeTextareaProps) {
+  const ref = useRef<HTMLTextAreaElement | null>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+  }, [value]);
+
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      rows={1}
+      onChange={(e) => onChange(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      className={className}
+    />
+  );
+});
 
 interface SrtReviewPanelProps {
   audioBlob: Blob | null;
@@ -11,6 +43,8 @@ interface SrtReviewPanelProps {
   onRealign: () => void;
   realigning?: boolean;
   dark?: boolean;
+  onEntryTextChange?: (id: number, text: string) => void;
+  onEntryBlur?: () => void;
 }
 
 export default function SrtReviewPanel({
@@ -21,6 +55,8 @@ export default function SrtReviewPanel({
   onRealign,
   realigning = false,
   dark = false,
+  onEntryTextChange,
+  onEntryBlur,
 }: SrtReviewPanelProps) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -39,6 +75,7 @@ export default function SrtReviewPanel({
   }, [audioBlob]);
 
   const activeIndex = srtEntries.findLastIndex(e => currentTime >= e.start && currentTime < e.end);
+  rowRefs.current = rowRefs.current.slice(0, srtEntries.length);
 
   useEffect(() => {
     const el = rowRefs.current[activeIndex];
@@ -59,19 +96,16 @@ export default function SrtReviewPanel({
   }
 
   function handleSeeking(e: React.SyntheticEvent<HTMLAudioElement>) {
-    console.log('[seek] seeking currentTime=', e.currentTarget.currentTime);
     setCurrentTime(e.currentTarget.currentTime);
   }
 
   function handleSeeked(e: React.SyntheticEvent<HTMLAudioElement>) {
     const audio = e.currentTarget;
-    console.log('[seek] seeked currentTime=', audio.currentTime);
     setCurrentTime(audio.currentTime);
 
     if (shouldAutoplayAfterSeekRef.current) {
       shouldAutoplayAfterSeekRef.current = false;
       pendingSeekRef.current = null;
-      console.log('[seek] play after seeked');
       void audio.play().catch(() => {});
     } else {
       pendingSeekRef.current = null;
@@ -80,15 +114,17 @@ export default function SrtReviewPanel({
 
   function handleCanPlay(e: React.SyntheticEvent<HTMLAudioElement>) {
     const audio = e.currentTarget;
-    console.log('[seek] canplay currentTime=', audio.currentTime, 'pending=', pendingSeekRef.current);
 
     if (pendingSeekRef.current !== null && shouldAutoplayAfterSeekRef.current) {
       shouldAutoplayAfterSeekRef.current = false;
       pendingSeekRef.current = null;
-      console.log('[seek] play after canplay');
       void audio.play().catch(() => {});
     }
   }
+
+  const handleEntryChange = useCallback((id: number, text: string) => {
+    onEntryTextChange?.(id, text);
+  }, [onEntryTextChange]);
 
   const faint = dark ? 'text-slate-500' : 'text-slate-400';
   const border = dark ? 'border-slate-700' : 'border-slate-200';
@@ -121,9 +157,19 @@ export default function SrtReviewPanel({
         />
       )}
 
+      <p className={`text-[10px] leading-relaxed ${faint}`}>
+        <span className="mr-1">✎</span>
+        字幕文字可直接點擊修改（時間軸不可調整）。編輯完成後點擊面板外會自動儲存，並清除舊的簡報／影片快取以便重新生成。
+      </p>
+
       <div
         ref={listRef}
         className={`h-52 overflow-y-auto rounded-xl border ${border} ${bg}`}
+        onBlur={(e) => {
+          if (!(e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget))) {
+            onEntryBlur?.();
+          }
+        }}
       >
         {srtEntries.length === 0 ? (
           <p className={`text-[11px] p-4 ${faint}`}>尚無字幕資料</p>
@@ -144,9 +190,15 @@ export default function SrtReviewPanel({
                 <span className={`text-[10px] font-mono shrink-0 mt-0.5 ${faint}`}>
                   {formatSec(entry.start)}
                 </span>
-                <span className={`text-[11px] leading-relaxed ${isActive ? (dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold') : (dark ? 'text-slate-200' : 'text-slate-800')}`}>
-                  {entry.text}
-                </span>
+                <AutoResizeTextarea
+                  value={entry.text}
+                  onChange={(text) => handleEntryChange(entry.id, text)}
+                  className={`flex-1 w-full bg-transparent outline-none border-b border-transparent focus:border-amber-500/50 transition-all resize-none overflow-hidden leading-relaxed text-[11px] ${
+                    isActive
+                      ? dark ? 'text-amber-300 font-semibold' : 'text-amber-700 font-semibold'
+                      : dark ? 'text-slate-200' : 'text-slate-800'
+                  }`}
+                />
               </div>
             );
           })
