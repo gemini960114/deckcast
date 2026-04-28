@@ -62,8 +62,13 @@ function triggerDownload(blob: Blob, filename: string) {
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  window.setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 60_000);
 }
 
 function getExportFilename(filename: string, burnSubs: boolean) {
@@ -149,6 +154,9 @@ export default function VideoExportBlock({
         }
 
         const blob = await res.blob();
+        if (blob.size === 0) {
+          throw new Error('影片下載失敗：伺服器回傳空檔案');
+        }
         triggerDownload(blob, exportFilename);
         onCached(blob, exportFilename);
         setStatus('idle');
