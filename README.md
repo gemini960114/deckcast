@@ -501,9 +501,10 @@ docker compose --env-file .env.local up -d --build
 nginx 會自動接管 80 / 443，HTTP 請求會自動 redirect 到 HTTPS。
 
 **nginx 設定重點（`nginx/default.conf`）：**
-- `proxy_buffering off` — 確保 LLM streaming / SSE 不被暫存卡住
-- `client_max_body_size 60M` — 配合 PDF 與音訊上傳需求
+- `proxy_buffering off` — 確保 LLM streaming / SSE 不被暫存卡住（全域）
+- `client_max_body_size 200M` — 配合 PDF / 音訊上傳及 export-video 最大 150MB payload 需求
 - `proxy_read_timeout 600s` — 配合長時間 AI 處理
+- `/api/export-video` 獨立 location 啟用 `proxy_buffering on` — FFmpeg 完成後一次性回傳的大型 MP4（可達數百 MB）需要 nginx 暫存緩衝才能穩定傳輸，不受全域 `proxy_buffering off` 影響
 
 ### 方式 3：雲端部署 (Google Cloud Run)
 

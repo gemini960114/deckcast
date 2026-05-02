@@ -848,3 +848,14 @@
 ### 32.5 設計備註
 - **為什麼 `AutoResizeTextarea` 不接收 `id` prop**：目前 `onChange={(text) => handleEntryChange(entry.id, text)}` 仍為 per-render closure，但 `React.memo` 已緩解大部分重繪；完整消除需讓 textarea 接收 `id` 並在內部組合（可作為後續優化，不影響功能正確性）
 - **為什麼 blur 不清除 `srtConfirmed`**：使用者只是修改字幕文字，確認狀態應保留；清除 pptx/video blob 已足夠觸發下游重生成
+
+## 33. 2026-05-02 維運 bug 修正
+
+### 33.1 Docker healthcheck IPv4 修正（`docker-compose.yml`）
+- [x] **healthcheck 從 `localhost` 改為 `127.0.0.1`**：Next.js standalone 只 listen IPv4；容器內 `localhost` 解析至 IPv6 `::1`，wget 永遠 Connection refused，FailingStreak 累積至 3941+；改成 `http://127.0.0.1:3000/` 後立即恢復 healthy
+- [x] **套用方式**：`docker compose up -d --no-build` 重新 recreate container（無需 rebuild image）
+
+### 33.2 nginx MP4 下載可靠性修正（`nginx/default.conf`）
+- [x] **`client_max_body_size` 60M → 200M**：export-video request body 最大 150MB（`MAX_BODY_BYTES`），原本 60M 上限讓較大 payload 直接被 nginx 擋掉回 413，FFmpeg 不啟動
+- [x] **新增 `/api/export-video` 獨立 location**：`proxy_buffering on` + `proxy_buffers 16 1m` + `proxy_max_temp_file_size 512m`；FFmpeg 完成後一次性回傳的大型 MP4 binary 需要 nginx buffer 才能穩定傳輸；全域 `proxy_buffering off`（LLM streaming 用）不影響此 location
+- [x] **nginx reload**：`docker exec deckcast-nginx nginx -s reload`（無停機，毫秒級生效）
