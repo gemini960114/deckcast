@@ -849,6 +849,13 @@
 - **為什麼 `AutoResizeTextarea` 不接收 `id` prop**：目前 `onChange={(text) => handleEntryChange(entry.id, text)}` 仍為 per-render closure，但 `React.memo` 已緩解大部分重繪；完整消除需讓 textarea 接收 `id` 並在內部組合（可作為後續優化，不影響功能正確性）
 - **為什麼 blur 不清除 `srtConfirmed`**：使用者只是修改字幕文字，確認狀態應保留；清除 pptx/video blob 已足夠觸發下游重生成
 
+## 34. 2026-05-02 TTS 分段功能失效修正
+
+### 34.1 docker-compose.yml environment block 覆蓋問題
+- [x] **移除 `TTS_CHUNKING_ENABLED` 從 `environment:` block**（`docker-compose.yml`）：`environment:` 優先權高於 `env_file:`；原本 `TTS_CHUNKING_ENABLED: ${TTS_CHUNKING_ENABLED:-false}` 在 shell 沒有此變數時寫死為 `false`，覆蓋 `.env.local` 的 `true`，導致 Step 3 分段選單消失
+- [x] **修正方式**：直接刪除該行，讓 `TTS_CHUNKING_ENABLED` 完全由 `env_file: .env.local` 控制；套用 `docker compose up -d --no-build` 後容器內 `TTS_CHUNKING_ENABLED=true` 確認正確
+- [x] **cloudbuild.yaml 不受影響**：Cloud Run 無 `.env.local`，env var 全來自 `--set-env-vars`，`_TTS_CHUNKING_ENABLED` 預設 `false` 行為正確，需啟用時於 CLI `--substitutions` 明確帶入
+
 ## 33. 2026-05-02 維運 bug 修正
 
 ### 33.1 Docker healthcheck IPv4 修正（`docker-compose.yml`）

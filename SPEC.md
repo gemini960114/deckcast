@@ -2,6 +2,10 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v26 補充亮點（2026-05-02，TTS 分段功能失效修正）：
+1. **`docker-compose.yml` 移除 `TTS_CHUNKING_ENABLED` environment block**：`environment:` block 的優先權高於 `env_file:`，原本寫法 `TTS_CHUNKING_ENABLED: ${TTS_CHUNKING_ENABLED:-false}` 在 shell 環境沒有此變數時，會以 `false` 覆蓋掉 `.env.local` 裡的 `true`，導致 Step 3 TTS 分段下拉選單消失、所有 Podcast 一律不分段。修正方式：直接將此行從 `environment:` 中移除，讓 `TTS_CHUNKING_ENABLED` 完全由 `env_file: .env.local` 控制，不再有衝突覆蓋。
+2. **`cloudbuild.yaml` 無此問題**：Cloud Run 沒有 `.env.local`，env var 全部來自 `--set-env-vars`，`_TTS_CHUNKING_ENABLED` 預設 `'false'` 行為正確；需啟用時於 CLI `--substitutions` 明確帶入 `_TTS_CHUNKING_ENABLED=true`。
+
 ### ✨ v25 補充亮點（2026-05-02，維運 bug 修正）：
 1. **Docker healthcheck IPv4 修正**（`docker-compose.yml`）：healthcheck 指令從 `http://localhost:3000/` 改為 `http://127.0.0.1:3000/`。根本原因：Next.js standalone 只 listen IPv4 `0.0.0.0:3000`，容器內 `localhost` 預設解析至 IPv6 `::1`，造成 wget 永遠回傳 `Connection refused`，FailingStreak 累積至 3941+；改成明確 IPv4 後 healthcheck 立即恢復 healthy。
 2. **nginx `client_max_body_size` 60M → 200M**（`nginx/default.conf`）：export-video route 設計最大 payload 為 150MB（`MAX_BODY_BYTES = 150 * 1024 * 1024`，即 base64 音訊 ≈ 67MB + 投影片圖片），原本 60M 的 nginx 上限會在較大請求時直接回傳 **413**，後端 FFmpeg 根本不啟動；調高至 200M 後完全覆蓋 route 的設計上限。

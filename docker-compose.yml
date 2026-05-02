@@ -17,7 +17,6 @@ services:
       NODE_ENV: production
       PORT: 3000
       HOSTNAME: 0.0.0.0
-      TTS_CHUNKING_ENABLED: ${TTS_CHUNKING_ENABLED:-false}
       LOG_FILE_PATH: ${LOG_FILE_PATH:-/app/logs/usage.jsonl}
     volumes:
       - ./logs:/app/logs
