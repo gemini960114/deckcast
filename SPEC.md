@@ -2,6 +2,16 @@
 
 > 本文件供 LLM 閱讀，從零重現此專案。包含完整架構、所有程式碼、遇到的問題與解法。
 
+### ✨ v27 補充亮點（2026-05-03，分段 TTS 音檔後製 Phase A+B+C）：
+1. **問題背景**：chunked TTS 直接 PCM 拼接會暴露三個問題——(i) 各段 Gemini TTS 回傳的響度不一致，(ii) 固定 800ms 靜音讓 chunk 邊界像剪接，(iii) 最終 WAV 沒有統一響度目標，專案間音量落差大。最初的 10ms `acrossfade` 版本反而讓兩段黏太緊，失去「換投影片」的自然停頓。
+2. **新增 `lib/ttsPostprocess.ts`**：對外只暴露 `postprocessChunks(pcmChunks, { sampleRate })`。內部 pipeline 為 `ebur128 分析 → 保守增益匹配 → fade-out + silence + fade-in 轉場 → whole-file loudnorm`，全部由 FFmpeg 串接；所有暫存檔走 `os.tmpdir()/podcast-tts-postprocess` 或 `/tmp/podcast-tts-postprocess`，以 `crypto.randomUUID()` 為 prefix，統一 `finally` 清理以防中途失敗殘留。
+3. **Phase A — whole-file loudnorm**：`loudnorm=I=-16:TP=-1.5:LRA=11`（podcast 主流響度目標），在所有 chunk 合併後才跑，不對單一 chunk 做激進壓縮。loudnorm 失敗時降級只用 merged WAV 並 `console.warn`，但回到 route 層前已有更上層的 502 guard。
+4. **Phase B — per-chunk 響度分析 + 保守增益匹配**：每個 chunk 先跑 `ebur128` 抓 integrated loudness，取所有可讀到的 LUFS 中位數當目標，逐 chunk 算 `delta = median - chunkLufs`；`|delta| < TTS_GAIN_MATCH_THRESHOLD_DB (1.5)` 不動、超過則 `volume=xdB` filter 套用，並以 `TTS_GAIN_MATCH_MAX_DB (4)` 做安全上限。避免把單一偏靜段強推到很大聲而失去語氣起伏。
+5. **Phase C — slide-boundary fade 轉場**：不再用 `acrossfade` 重疊，改為每個 chunk 尾段 `afade=t=out`、中間插入 `aevalsrc` 靜音、下一段頭段 `afade=t=in`、最後一次 `concat` 串起來。預設 100ms / 500ms / 80ms ≈ 680ms 的「換投影片呼吸感」，且以 `chunkDurationsSec` 動態推算 fade-out 的 `st=`；chunk 比 fadeOut 短時會 clamp 到 `duration-0.001` 避免 filter crash。若 fade filter graph 失敗會退到 `buildConcatWithGapFilter` 的 fallback gap merge（`TTS_FALLBACK_GAP_MS = 60`）；兩者都失敗才往外丟錯。
+6. **env 覆蓋與預設**：`TTS_SLIDE_FADE_OUT_MS` / `TTS_SLIDE_SILENCE_MS` / `TTS_SLIDE_FADE_IN_MS` 透過新的 `readMsEnv()` 讀取（非負整數才接受、其餘 fallback 到常數），所以聽感微調不用改 code、改 env 重啟即可。原本 `TTS_CROSSFADE_MS` / `TTS_FALLBACK_GAP_MS` 保留但標記為「reserved」，留給未來可能的 intra-slide 邊界處理。
+7. **`generate-podcast/route.ts` 整合**：在既有 chunk 產生迴圈後分岔——`TTS_CHUNK_POSTPROCESSING_ENABLED=true && rawChunks.length >= 2` 走新 pipeline、否則走舊的 `concatPcmChunks + createSilence` 路徑。logs 改輸出 `chunkLufs` / `gainAppliedDb` / `mergeStrategy`(= `'fade-silence-fade'` 或 `'concat-with-gap'`) / `loudnormApplied`，方便早期診斷。**失敗一律回 502**（文案「Chunk 音檔後製失敗：…」）而非悄悄回原始 concat WAV；silent fallback 會讓音質 bug 難以查。
+8. **失敗邏輯與單元測試**：新增 `__tests__/ttsPostprocess.test.ts` 共 31 個測試，覆蓋 `parseIntegratedLoudness` / `median` / `computeGainDb` / `pcmToWav` / `pcmDurationSec` / `buildFadeTransitionFilter`（2/3/4 chunk、fade clamp、silenceMs=0）/ `buildConcatWithGapFilter` / `readMsEnv`（未設/空白/非數/負值/0/正整數）/ `getTempDir` / `getFFmpegBinary`。FFmpeg 實測留給人工聽感階段，不在單元測試。全專案 129 tests 全綠，`tsc --noEmit` / `eslint` 皆無警告。
+
 ### ✨ v26 補充亮點（2026-05-02，TTS 分段功能失效修正）：
 1. **`docker-compose.yml` 移除 `TTS_CHUNKING_ENABLED` environment block**：`environment:` block 的優先權高於 `env_file:`，原本寫法 `TTS_CHUNKING_ENABLED: ${TTS_CHUNKING_ENABLED:-false}` 在 shell 環境沒有此變數時，會以 `false` 覆蓋掉 `.env.local` 裡的 `true`，導致 Step 3 TTS 分段下拉選單消失、所有 Podcast 一律不分段。修正方式：直接將此行從 `environment:` 中移除，讓 `TTS_CHUNKING_ENABLED` 完全由 `env_file: .env.local` 控制，不再有衝突覆蓋。
 2. **`cloudbuild.yaml` 無此問題**：Cloud Run 沒有 `.env.local`，env var 全部來自 `--set-env-vars`，`_TTS_CHUNKING_ENABLED` 預設 `'false'` 行為正確；需啟用時於 CLI `--substitutions` 明確帶入 `_TTS_CHUNKING_ENABLED=true`。

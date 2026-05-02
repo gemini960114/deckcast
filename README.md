@@ -97,8 +97,9 @@
   - **每一批次都會重新注入完整 AUDIO PROFILE preamble**（新格式 → `# AUDIO PROFILE / ## Speaker1/2 / # SCENE / # SAMPLE CONTEXT`；舊格式 → `風格:` 單行）送進 Gemini TTS，確保段與段之間的聲線 / 口音 / 節奏保持一致，避免長稿中段音色漂移；preamble 不計入每段字數上限 `TTS_CHUNK_CHARS`
   - 選單只在 `TTS_CHUNKING_ENABLED=true`（server 已開啟分段功能）時顯示；`false` 時整個欄位隱藏，預設不分段
   - ⚠️ **Docker Compose 部署注意**：`TTS_CHUNKING_ENABLED` 必須只放在 `.env.local`，不可同時出現在 `docker-compose.yml` 的 `environment:` block（`environment:` 優先權高於 `env_file:`，會覆蓋 `.env.local` 的值）
-  - 每段字數上限由 `TTS_CHUNK_CHARS`（中文基準 800）控制，切段失敗時最多自動重試 2 次
-  - **依內容語言自動調整字數上限**（v21）：`TTS_CHUNK_LANG_MULTIPLIER` 把中文基準乘上每語言倍率——英文 × 2.5（2000 字）、日文 × 1.5（1200 字）、韓文 × 1.25（1000 字），確保每個 chunk 的實際音訊長度都在 145-160 秒區間，不因語言差異導致 chunk 過碎（英文若沿用 800 字只有 ~58 秒）或長稿警示誤觸發；舊紀錄無 `contentLanguage` 欄位時 fallback 到中文基準
+  - 每段字數上限由 `TTS_CHUNK_CHARS`（中文基準 650）控制，切段失敗時最多自動重試 2 次
+  - **依內容語言自動調整字數上限**（v21）：`TTS_CHUNK_LANG_MULTIPLIER` 把中文基準乘上每語言倍率——英文 × 2.5（1625 字）、日文 × 1.5（975 字）、韓文 × 1.25（813 字），確保每個 chunk 的實際音訊長度約在 115-130 秒區間，不因語言差異導致 chunk 過碎（英文若沿用 650 字只有 ~47 秒）或長稿警示誤觸發；舊紀錄無 `contentLanguage` 欄位時 fallback 到中文基準
+  - **分段 TTS 音檔後製（v27，Phase A+B+C）**：`TTS_CHUNK_POSTPROCESSING_ENABLED=true` 時對分段後的 PCM chunk 走 FFmpeg pipeline：(A) 逐段 `ebur128` 響度分析 + 對齊到中位數的保守增益匹配（小於 1.5 dB 不調、最多 ±4 dB），(B) slide-boundary fade-out/silence/fade-in 轉場（預設 100ms / 500ms / 80ms，可由 `TTS_SLIDE_FADE_OUT_MS` / `TTS_SLIDE_SILENCE_MS` / `TTS_SLIDE_FADE_IN_MS` env 覆蓋），(C) 整段 `loudnorm=I=-16:TP=-1.5:LRA=11` 收斂到 podcast 響度目標；只對 chunked 模式生效，單段 fast path 不碰；FFmpeg 失敗時回傳 502 不 silent fallback，便於早期診斷
 
 ### 歌曲音訊生成
 - 使用 Google Lyria 3 AI 作曲模型
@@ -385,6 +386,14 @@ VIDEO_FFMPEG_BIN=C:\path\to\ffmpeg\bin
 
 # TTS 分段生成（解決長篇破音）
 TTS_CHUNKING_ENABLED=false
+
+# TTS 分段音檔後製（Phase A+B+C：響度匹配 + slide 邊界淡入淡出 + 整段 loudnorm）
+# 僅對分段模式生效，單段快速路徑不受影響；需要 FFmpeg
+TTS_CHUNK_POSTPROCESSING_ENABLED=false
+# slide 邊界參數（聽感微調；預設 100/500/80 = 680ms「換投影片」停頓）
+TTS_SLIDE_FADE_OUT_MS=100
+TTS_SLIDE_SILENCE_MS=500
+TTS_SLIDE_FADE_IN_MS=80
 ```
 
 說明：
@@ -398,6 +407,8 @@ TTS_CHUNKING_ENABLED=false
 - `VIDEO_EXPORT_ENABLED=true` 啟用影片匯出功能；需同時設定 `NEXT_PUBLIC_VIDEO_EXPORT_ENABLED=true`（build-time）
 - `VIDEO_FFMPEG_BIN` 僅 **Windows 本地開發** 時需要，填入 ffmpeg.exe 所在目錄；Linux / Docker / Cloud Run 留空，程式直接呼叫系統 `ffmpeg`
 - `TTS_CHUNKING_ENABLED=true` 啟用 TTS 分段生成功能；`false`（預設）時 Step 3 不顯示 TTS 生成模式選單，一律不分段。使用者的最終選擇（分段 / 不分段）在 Step 3 UI 控制，env flag 僅作為 server 能力開關。Cloud Run 部署時透過 `_TTS_CHUNKING_ENABLED` substitution 傳入。**Docker Compose 時此變數只能放 `.env.local`，不可在 `environment:` block 重複定義**（`environment:` 優先權高於 `env_file:`，會蓋掉 `.env.local` 的值）
+- `TTS_CHUNK_POSTPROCESSING_ENABLED=true` 啟用分段音檔 FFmpeg 後製（響度匹配 + slide 邊界淡入淡出 + 整段 loudnorm）；需要容器內有 FFmpeg。只在 `TTS_CHUNKING_ENABLED=true` 且實際分段（≥ 2 chunk）時生效；失敗時後端回 502，不 silent fallback
+- `TTS_SLIDE_FADE_OUT_MS` / `TTS_SLIDE_SILENCE_MS` / `TTS_SLIDE_FADE_IN_MS` 控制 chunk 邊界過渡聽感；預設 100 / 500 / 80（ms），想更貼近則下調 silence（到 300-400），太緊則上調（到 600-700）。改完 env 重啟 dev server 立即生效，不需改 code
 - `NEXT_PUBLIC_*` 變數會在 build 時注入前端，Docker / Cloud Run 部署時請在建置階段就提供正確值
 
 ---

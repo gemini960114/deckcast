@@ -866,3 +866,65 @@
 - [x] **`client_max_body_size` 60M → 200M**：export-video request body 最大 150MB（`MAX_BODY_BYTES`），原本 60M 上限讓較大 payload 直接被 nginx 擋掉回 413，FFmpeg 不啟動
 - [x] **新增 `/api/export-video` 獨立 location**：`proxy_buffering on` + `proxy_buffers 16 1m` + `proxy_max_temp_file_size 512m`；FFmpeg 完成後一次性回傳的大型 MP4 binary 需要 nginx buffer 才能穩定傳輸；全域 `proxy_buffering off`（LLM streaming 用）不影響此 location
 - [x] **nginx reload**：`docker exec deckcast-nginx nginx -s reload`（無停機，毫秒級生效）
+
+## 35. 2026-05-03 分段 TTS 音檔後製（Phase A+B+C 一次到位）
+
+### 35.1 背景動機
+- 舊版 chunked TTS 直接 PCM 拼接後，使用者反映 (i) 各段響度高低起伏、(ii) 固定 800ms 靜音還是像剪接、(iii) 整段響度不一致；初版改成 10ms `acrossfade` 反而讓兩段黏得太緊，失去「換投影片」的呼吸感
+- 先規劃（`PLAN_TTS_CHUNK_AUDIO_POSTPROCESSING.md`）再實作；計畫分 Phase A/B/C/D，本次一次完成 A+B+C，D 留到有真實樣本才做
+
+### 35.2 常數（`lib/constants.ts`）
+- [x] **`TTS_TARGET_LUFS = -16`**：podcast 主流響度目標
+- [x] **`TTS_TRUE_PEAK = -1.5`**：true peak 上限
+- [x] **`TTS_LRA = 11`**：loudness range 目標
+- [x] **`TTS_GAIN_MATCH_THRESHOLD_DB = 1.5`**：小於此值的 LUFS 差不調，避免把自然起伏壓掉
+- [x] **`TTS_GAIN_MATCH_MAX_DB = 4`**：單段增益修正上限，避免把偏靜段推爆
+- [x] **`TTS_SLIDE_FADE_OUT_MS = 100` / `TTS_SLIDE_SILENCE_MS = 500` / `TTS_SLIDE_FADE_IN_MS = 80`**：slide 邊界聽感預設值（約 680ms 換投影片感）
+- [x] **`TTS_CROSSFADE_MS` / `TTS_FALLBACK_GAP_MS` 保留為 reserved**：給未來 intra-slide 邊界用
+
+### 35.3 `lib/ttsPostprocess.ts`（新建）
+- [x] **`getFFmpegBinary()` / `getTempDir()`**：與 `app/api/normalize-podcast-audio/route.ts` 行為一致；Windows 走 `os.tmpdir()/podcast-tts-postprocess`，其他平台走 `/tmp/podcast-tts-postprocess`；session 檔名加 `crypto.randomUUID()`
+- [x] **`pcmToWav()` / `pcmDurationSec()`**：route 以外可重用的純函式；duration 用 `pcmByteLength / 2 / sampleRate`，不需額外 `ffprobe` 呼叫
+- [x] **`parseIntegratedLoudness(stderr)`**：掃 ffmpeg `ebur128` stderr 取最後一行 `I: xx.x LUFS` 的數值；找不到回 `null`
+- [x] **`median(values)`**：中位數 helper，過濾 NaN / Infinity
+- [x] **`computeGainDb(chunkLufs, targetLufs, threshold, max)`**：套用 threshold + cap 的保守增益計算
+- [x] **`readMsEnv(name, fallback)`**：env 解析 helper，只接受非負整數
+- [x] **`buildFadeTransitionFilter(chunkDurationsSec, opts)`**：fade-out / silence / fade-in / concat 的 filter graph；第一段只 fade-out、最後一段只 fade-in、中間兩個都做；chunk 比 fade 短時 clamp 到 `duration - 0.001`
+- [x] **`buildConcatWithGapFilter(count, gapMs, sampleRate)`**：fallback；純 `aevalsrc` 靜音 + concat
+- [x] **`analyzeLoudness()` / `applyGain()` / `mergeWavs()` / `finalLoudnorm()`**：各自單次 ffmpeg 呼叫，失敗把 stderr 尾 2000 字回拋
+- [x] **`postprocessChunks(pcmChunks, options)`**：主入口；`finally` 統一清 temp files；回傳 `{ wav, metrics }`，metrics 含 `chunkLufs` / `chunkGainAppliedDb` / `mergeStrategy: 'fade-silence-fade' | 'concat-with-gap'` / `finalLoudnormApplied` 與各階段耗時
+
+### 35.4 route 整合（`app/api/generate-podcast/route.ts`）
+- [x] **import `postprocessChunks` from `@/lib/ttsPostprocess`**
+- [x] **multi-chunk 迴圈不動**，原本的 `trimLeadingSilence` / `trimTrailingSilence` / `createSilence` 仍產生 `pcmChunks`（舊路徑）；同時把每段 raw PCM 也 push 到 `rawChunks`
+- [x] **`TTS_CHUNK_POSTPROCESSING_ENABLED === 'true' && rawChunks.length >= 2`** 時走 `postprocessChunks(rawChunks, { sampleRate: baseSampleRate })`，其他情況回到 `concatPcmChunks` 舊路徑
+- [x] **logs 加 `chunkLufs` / `gainAppliedDb` / `mergeStrategy` / `loudnormApplied`**：早期診斷用
+- [x] **失敗回 502**（文案「Chunk 音檔後製失敗：…」）而非 silent fallback，避免音質 bug 被蓋掉
+
+### 35.5 env docs
+- [x] **`.env.example` 新增** `TTS_CHUNK_POSTPROCESSING_ENABLED` 與三個 `TTS_SLIDE_*_MS`，含使用說明與調參方向
+- [x] **`.env.local`** 加入相同三個 `TTS_SLIDE_*_MS=100/500/80`；附微調註解（太緊 → 調高 silence 到 600-700，太拖 → 調低到 300-400）
+
+### 35.6 單元測試（`__tests__/ttsPostprocess.test.ts`，新建）
+- [x] **`parseIntegratedLoudness`** × 3（null / ebur128 實際 stderr / 正值）
+- [x] **`median`** × 4（空 / 奇數 / 偶數 / 過濾 NaN+Infinity）
+- [x] **`computeGainDb`** × 4（threshold / 正常 / cap / NaN）
+- [x] **`pcmToWav`** × 2（header 44 bytes / sampleRate bytes）
+- [x] **`getTempDir`** × 1（Windows / POSIX 分支）
+- [x] **`getFFmpegBinary`** × 2（env 未設 / 設值）
+- [x] **`pcmDurationSec`** × 1（三組樣本）
+- [x] **`buildFadeTransitionFilter`** × 6（<2 chunk / 2 chunk / 3 chunk middle / 4 chunk 7 段 / fade clamp / silenceMs=0）
+- [x] **`buildConcatWithGapFilter`** × 2（<2 / 正常 3 輸入）
+- [x] **`readMsEnv`** × 6（unset / 空白 / 非數 / 負 / 0 / 正整數）
+- [x] **FFmpeg 實測不 mock**：留給計畫 §13 的人工聽感階段；本單元測試只驗純函式與 filter string
+
+### 35.7 驗證
+- [x] **`vitest run` 129 / 129 通過**（原 114 + 新增 15）
+- [x] **`tsc --noEmit`** 無錯
+- [x] **`eslint lib/ttsPostprocess.ts app/api/generate-podcast/route.ts __tests__/ttsPostprocess.test.ts`** 無警告
+
+### 35.8 未做（計畫明確延後）
+- [ ] **Phase D — 離群 chunk 偵測 / 自動重跑**：需要真實多樣品才能訂閾值，暫不做
+- [ ] **intra-slide 邊界獨立參數**：目前 slide / intra-slide 共用 500ms silence；要分流需 `splitScriptIntoChunks` 回傳邊界型別，工程較大，先觀察統一設定的效果
+- [ ] **真實音檔人工聽感（計畫 §13）**：三語（zh-TW duo / en solo / zh-TW solo）長腳本各跑一次，測 LUFS 命中、有無 pumping、有無子音被 fade 吃掉；結果回饋後再調 env 或常數
+- [ ] **`SPEC.md §10 loudness 目標 / crossfade 行為 / known limitations` 章節**：計畫 §16 要求驗證後再寫入，等聽感結果出來再補
