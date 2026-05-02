@@ -7,6 +7,7 @@ import {
   extractSoloScript,
   splitScriptIntoChunks,
 } from '@/lib/scriptFormat';
+import { postprocessChunks } from '@/lib/ttsPostprocess';
 
 export const maxDuration = 600;
 
@@ -212,6 +213,14 @@ export async function POST(req: NextRequest) {
     }
 
     // Multi-chunk path
+    const postprocessingEnabled =
+      process.env.TTS_CHUNK_POSTPROCESSING_ENABLED === 'true';
+
+    // Raw PCM (post silence-trim) per chunk. When postprocessing is enabled we
+    // hand these to ttsPostprocess which runs FFmpeg-based gain match +
+    // boundary crossfade + final loudnorm. When disabled we fall back to the
+    // original concat-with-fixed-silence path.
+    const rawChunks: Uint8Array[] = [];
     const pcmChunks: Uint8Array[] = [];
     let baseSampleRate = 24000;
     let baseMimeType   = '';
@@ -240,6 +249,8 @@ export async function POST(req: NextRequest) {
       let pcm: Uint8Array = new Uint8Array(Buffer.from(audioData, 'base64'));
       if (i > 0)                   pcm = trimLeadingSilence(pcm, 200, 300, baseSampleRate);
       if (i < chunks.length - 1)   pcm = trimTrailingSilence(pcm, 200, 80, baseSampleRate);
+
+      rawChunks.push(pcm);
       pcmChunks.push(pcm);
       if (i < chunks.length - 1)   pcmChunks.push(createSilence(CHUNK_GAP_MS, baseSampleRate));
 
@@ -248,6 +259,36 @@ export async function POST(req: NextRequest) {
 
     if (pcmChunks.length === 0) {
       return NextResponse.json({ error: 'No audio data returned from any chunk' }, { status: 502 });
+    }
+
+    if (postprocessingEnabled && rawChunks.length >= 2) {
+      try {
+        const started = Date.now();
+        const { wav, metrics } = await postprocessChunks(rawChunks, {
+          sampleRate: baseSampleRate,
+        });
+        console.log(
+          `[generate-podcast] postprocess ok mode=${narrationMode} ` +
+          `chunks=${rawChunks.length} wavBytes=${wav.byteLength} ` +
+          `totalMs=${Date.now() - started} analyzeMs=${metrics.analyzeMs} ` +
+          `gainMs=${metrics.gainMs} mergeMs=${metrics.mergeMs} ` +
+          `loudnormMs=${metrics.loudnormMs} ` +
+          `chunkLufs=${JSON.stringify(metrics.chunkLufs)} ` +
+          `gainAppliedDb=${JSON.stringify(metrics.chunkGainAppliedDb)} ` +
+          `mergeStrategy=${metrics.mergeStrategy} ` +
+          `loudnormApplied=${metrics.finalLoudnormApplied}`,
+        );
+        return makeWavResponse(wav);
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error(`[generate-podcast] postprocess failed: ${msg}`);
+        // Per plan §12: surface postprocess failures as 502 during early rollout
+        // rather than silently returning the lower-quality concat output.
+        return NextResponse.json(
+          { error: `Chunk 音檔後製失敗：${msg}` },
+          { status: 502 },
+        );
+      }
     }
 
     const wavData = concatPcmChunks(pcmChunks, baseSampleRate);

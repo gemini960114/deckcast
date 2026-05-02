@@ -167,6 +167,30 @@ export const TTS_LONG_SEC    = 320;  // 實際音訊 ~4 分鐘時觸發長篇警
 export const TTS_CHUNK_CHARS = 650;   // 後端每段台詞字數上限（**中文基準**，330 chars/min ≈ 2.0 分鐘）；其他語言依 TTS_CHUNK_LANG_MULTIPLIER 倍率推算
 export const CHUNK_GAP_MS    = 800;  // chunk 間插入的固定靜音（ms）
 
+// ===== TTS Chunk Audio Postprocessing (plan: PLAN_TTS_CHUNK_AUDIO_POSTPROCESSING.md) =====
+// Phase A: whole-file loudnorm to ~-16 LUFS podcast target.
+// Phase B: per-chunk loudness analysis + conservative gain matching.
+// Phase C: short crossfade / controlled gap for smoother boundaries.
+export const TTS_TARGET_LUFS                = -16;   // integrated loudness target (I=)
+export const TTS_TRUE_PEAK                  = -1.5;  // true peak ceiling (TP=)
+export const TTS_LRA                        = 11;    // loudness range (LRA=)
+export const TTS_GAIN_MATCH_THRESHOLD_DB    = 1.5;   // ignore deltas smaller than this
+export const TTS_GAIN_MATCH_MAX_DB          = 4;     // cap per-chunk correction
+
+// Phase C slide-boundary transition: chunk boundaries mostly align with slide
+// boundaries, so we use a fade-out + silence + fade-in transition instead of a
+// tight crossfade. This gives a natural "turning the page" feel instead of a
+// hard-edit or over-long pause. Values are overridable via env
+// (TTS_SLIDE_FADE_OUT_MS / TTS_SLIDE_SILENCE_MS / TTS_SLIDE_FADE_IN_MS).
+export const TTS_SLIDE_FADE_OUT_MS          = 100;   // chunk tail fade-out
+export const TTS_SLIDE_SILENCE_MS           = 500;   // silence gap between chunks
+export const TTS_SLIDE_FADE_IN_MS           = 80;    // chunk head fade-in
+
+// Reserved for future intra-slide boundary handling (when one slide is split
+// across chunks). Not currently used by the slide transition filter.
+export const TTS_CROSSFADE_MS               = 10;    // reserved: intra-slide crossfade
+export const TTS_FALLBACK_GAP_MS            = 60;    // reserved: intra-slide fallback gap
+
 /**
  * Per-language multiplier for TTS_CHUNK_CHARS.
  *
