@@ -207,6 +207,62 @@ export function extractSoloScript(script: string): string {
   return instruction + dialogueLines.join('\n');
 }
 
+function getFirstDialogueSpeaker(chunk: string): 1 | 2 | null {
+  const line = chunk
+    .split('\n')
+    .map(l => l.trim())
+    .find(l => /^Speaker\s+[12]\s*(\([^)]*\))?\s*:/i.test(l));
+  if (!line) return null;
+  return /^Speaker\s+1\b/i.test(line) ? 1 : 2;
+}
+
+function popTrailingSpeaker1Line(chunk: string): {
+  chunk: string;
+  line: string | null;
+} {
+  const lines = chunk.split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const trimmed = lines[i].trim();
+    if (!trimmed) continue;
+    if (!/^Speaker\s+[12]\s*(\([^)]*\))?\s*:/i.test(trimmed)) break;
+    if (!/^Speaker\s+1\b/i.test(trimmed)) break;
+
+    const [line] = lines.splice(i, 1);
+    return { chunk: lines.join('\n').trim(), line };
+  }
+  return { chunk, line: null };
+}
+
+function insertDialogueAfterPreamble(chunk: string, line: string): string {
+  const preamble = extractPreamble(chunk);
+  if (!preamble) return `${line}\n${chunk}`.trim();
+
+  const rest = chunk.replace(preamble, '').replace(/^\n+/, '');
+  return `${preamble}\n\n${line}${rest ? `\n${rest}` : ''}`.trim();
+}
+
+/**
+ * Gemini multi-speaker TTS is noticeably less stable when a fresh request
+ * begins with Speaker 2: the first utterance can be skipped and the voice map
+ * may collapse toward Speaker 1's voice. Preserve dialogue order by moving the
+ * previous trailing Speaker 1 line across the boundary, so each subsequent
+ * chunk can establish Speaker 1 before Speaker 2 speaks.
+ */
+function avoidLeadingSpeaker2Chunks(chunks: string[]): string[] {
+  const balanced = [...chunks];
+  for (let i = 1; i < balanced.length; i++) {
+    if (getFirstDialogueSpeaker(balanced[i]) !== 2) continue;
+
+    const previous = popTrailingSpeaker1Line(balanced[i - 1]);
+    if (!previous.line) continue;
+
+    balanced[i - 1] = previous.chunk;
+    balanced[i] = insertDialogueAfterPreamble(balanced[i], previous.line);
+  }
+
+  return balanced.filter(c => /^Speaker\s+\d+/im.test(c));
+}
+
 /**
  * Split a script into TTS chunks whose dialogue char count does not exceed
  * `maxChars`. The preamble is preserved verbatim and re-prepended to every
@@ -310,5 +366,5 @@ export function splitScriptIntoChunks(
 
   if (currentLines.length > baseLen) pushChunk(currentLines);
 
-  return chunks.length > 0 ? chunks : [script];
+  return chunks.length > 0 ? avoidLeadingSpeaker2Chunks(chunks) : [script];
 }

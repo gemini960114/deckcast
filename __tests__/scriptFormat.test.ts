@@ -404,6 +404,50 @@ describe('splitScriptIntoChunks', () => {
       expect(dialogueOnly.length).toBeLessThanOrEqual(100);
     }
   });
+
+  it('does not start later chunks with Speaker 2 when a trailing Speaker 1 can be moved across the boundary', () => {
+    const script = [
+      '# AUDIO PROFILE',
+      '',
+      '## Speaker1: 「主持人」',
+      'Style: 熱情活潑。',
+      'Accent: 台灣口音。',
+      'Pacing: 明快。',
+      '',
+      '## Speaker2: 「導師」',
+      'Style: 溫暖親切。',
+      'Accent: 標準華語。',
+      'Pacing: 沉穩。',
+      '',
+      '投影片 5：AI 浪潮與教學模式的數位轉型',
+      'Speaker 1: ' + '一'.repeat(40),
+      'Speaker 2: ' + '二'.repeat(40),
+      'Speaker 1: ' + '三'.repeat(20),
+      '',
+      '投影片 6：EuroCC 驅動下的專業化發展',
+      'Speaker 2: 進入 2021 年後，在 EuroCC 框架下，訓練變得更專業。',
+      'Speaker 1: 感覺現在的內容越來越前衛。',
+    ].join('\n');
+
+    const chunks = splitScriptIntoChunks(script, 110);
+    expect(chunks.length).toBe(2);
+
+    const firstSpeakerInSecondChunk = chunks[1]
+      .split('\n')
+      .map(l => l.trim())
+      .find(l => /^Speaker\s+\d+:/i.test(l));
+    expect(firstSpeakerInSecondChunk).toMatch(/^Speaker 1:/);
+    expect(chunks[1]).toContain('Speaker 2: 進入 2021 年後');
+
+    const originalDialogue = script
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => /^Speaker\s+\d+:/i.test(l));
+    const chunkedDialogue = chunks
+      .flatMap(c => c.split('\n').map(l => l.trim()))
+      .filter(l => /^Speaker\s+\d+:/i.test(l));
+    expect(chunkedDialogue).toEqual(originalDialogue);
+  });
 });
 
 // --- PREAMBLE_LINE_RE --------------------------------------------------
@@ -447,33 +491,33 @@ describe('PREAMBLE_LINE_RE', () => {
 // --- resolveTtsChunkChars (plan_B language multiplier) ----------------
 
 describe('resolveTtsChunkChars', () => {
-  it('returns 800 for zh-TW baseline', () => {
-    expect(resolveTtsChunkChars('zh-TW')).toBe(800);
+  it('returns 650 for zh-TW baseline', () => {
+    expect(resolveTtsChunkChars('zh-TW')).toBe(650);
   });
-  it('returns 2000 for en (2.5x)', () => {
-    expect(resolveTtsChunkChars('en')).toBe(2000);
+  it('returns 1625 for en (2.5x)', () => {
+    expect(resolveTtsChunkChars('en')).toBe(1625);
   });
-  it('returns 1200 for ja (1.5x)', () => {
-    expect(resolveTtsChunkChars('ja')).toBe(1200);
+  it('returns 975 for ja (1.5x)', () => {
+    expect(resolveTtsChunkChars('ja')).toBe(975);
   });
-  it('returns 1000 for ko (1.25x)', () => {
-    expect(resolveTtsChunkChars('ko')).toBe(1000);
+  it('returns 813 for ko (1.25x)', () => {
+    expect(resolveTtsChunkChars('ko')).toBe(813);
   });
-  it('falls back to 800 (zh-TW baseline) when language is undefined', () => {
-    expect(resolveTtsChunkChars(undefined)).toBe(800);
+  it('falls back to 650 (zh-TW baseline) when language is undefined', () => {
+    expect(resolveTtsChunkChars(undefined)).toBe(650);
   });
 });
 
 // --- splitScriptIntoChunks with language-scaled maxChars --------------
 //
-// Regression lock: the same 1800-char script should split into >=3 chunks
-// under the zh-TW baseline (800 chars), but into exactly 1 chunk under the
-// en multiplier (2000 chars). Ensures the chunker responds to the
+// Regression lock: the same 1500-char script should split into >=3 chunks
+// under the zh-TW baseline (650 chars), but into exactly 1 chunk under the
+// en multiplier (1625 chars). Ensures the chunker responds to the
 // language-aware maxChars passed in by the caller.
 
 describe('splitScriptIntoChunks with language-scaled maxChars', () => {
   function buildLongDuoScript(totalChars: number): string {
-    // 6 slides × 2 Speakers × ~150 chars each ≈ 1800 chars
+    // 6 slides × 2 Speakers × ~125 chars each ≈ 1500 chars
     const perLine = Math.floor(totalChars / 12);
     const lines: string[] = ['風格: 輕鬆對談', ''];
     for (let i = 1; i <= 6; i++) {
@@ -484,14 +528,14 @@ describe('splitScriptIntoChunks with language-scaled maxChars', () => {
     return lines.join('\n');
   }
 
-  it('zh-TW baseline (maxChars=800): 1800 chars splits into >=3 chunks', () => {
-    const script = buildLongDuoScript(1800);
+  it('zh-TW baseline (maxChars=650): 1500 chars splits into >=3 chunks', () => {
+    const script = buildLongDuoScript(1500);
     const chunks = splitScriptIntoChunks(script, resolveTtsChunkChars('zh-TW'));
     expect(chunks.length).toBeGreaterThanOrEqual(3);
   });
 
-  it('en scaled (maxChars=2000): same 1800-char script fits in 1 chunk', () => {
-    const script = buildLongDuoScript(1800);
+  it('en scaled (maxChars=1625): same 1500-char script fits in 1 chunk', () => {
+    const script = buildLongDuoScript(1500);
     const chunks = splitScriptIntoChunks(script, resolveTtsChunkChars('en'));
     expect(chunks.length).toBe(1);
   });

@@ -164,33 +164,33 @@ export const DEFAULT_LYRICS_DURATION = '105';
 // ===== TTS Chunking Thresholds =====
 export const TTS_WARN_SEC    = 200;  // 實際音訊 ~2.5 分鐘時觸發提示（estSec = 實際 × 1.33）
 export const TTS_LONG_SEC    = 320;  // 實際音訊 ~4 分鐘時觸發長篇警示（estSec = 實際 × 1.33）
-export const TTS_CHUNK_CHARS = 800;   // 後端每段台詞字數上限（**中文基準**，330 chars/min ≈ 2.4 分鐘）；其他語言依 TTS_CHUNK_LANG_MULTIPLIER 倍率推算
+export const TTS_CHUNK_CHARS = 650;   // 後端每段台詞字數上限（**中文基準**，330 chars/min ≈ 2.0 分鐘）；其他語言依 TTS_CHUNK_LANG_MULTIPLIER 倍率推算
 export const CHUNK_GAP_MS    = 800;  // chunk 間插入的固定靜音（ms）
 
 /**
  * Per-language multiplier for TTS_CHUNK_CHARS.
  *
- * Goal: every chunk produces roughly 145-160s of audio regardless of language,
+ * Goal: every chunk produces roughly 115-130s of audio regardless of language,
  * so Gemini TTS quality degradation (>2.5min) hits all languages at a similar
- * boundary. Without this, English scripts chunked at 800 chars only produce
- * ~58s per chunk, wasting Gemini calls and triggering false long-script
+ * boundary. Without this, English scripts chunked at 650 chars only produce
+ * ~47s per chunk, wasting Gemini calls and triggering false long-script
  * warnings.
  *
- * Baseline (zh-TW): 800 chars @ 330 chars/min ≈ 145s.
+ * Baseline (zh-TW): 650 chars @ 330 chars/min ≈ 118s.
  * en=2.5x / ja=1.5x / ko=1.25x derived from per-language speech rate estimates;
  * see plan_B for reasoning. Tune after real TTS listening if needed.
  */
 export const TTS_CHUNK_LANG_MULTIPLIER: Record<ContentLanguage, number> = {
   'zh-TW': 1.0,
-  en:      2.5,   // ~825 chars/min → 2000 chars ≈ 145s
-  ja:      1.5,   // ~450 chars/min → 1200 chars ≈ 160s
-  ko:      1.25,  // ~420 chars/min → 1000 chars ≈ 145s
+  en:      2.5,   // ~825 chars/min → 1625 chars ≈ 118s
+  ja:      1.5,   // ~495 chars/min → 975 chars ≈ 118s
+  ko:      1.25,  // ~413 chars/min → 813 chars ≈ 118s
 };
 
 /**
  * Resolve the effective TTS_CHUNK_CHARS for a given content language.
  * Unknown or undefined language falls back to the zh-TW baseline, so legacy
- * records without contentLanguage keep their current behavior (800 chars).
+ * records without contentLanguage keep their current behavior (650 chars).
  */
 export function resolveTtsChunkChars(language?: ContentLanguage): number {
   const lang = language ?? DEFAULT_CONTENT_LANGUAGE;
